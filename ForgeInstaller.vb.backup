@@ -1,0 +1,40 @@
+﻿Imports System.IO
+Imports System.Net.Http
+
+Public Class ForgeInstaller
+    Public Async Function InstallForge(forgeVersion As String, minecraftDir As String) As Task(Of Boolean)
+        Try
+            ' URL per scaricare Forge installer
+            Dim forgeUrl As String = $"https://maven.minecraftforge.net/net/minecraftforge/forge/{forgeVersion}/forge-{forgeVersion}-installer.jar"
+            Dim installerPath As String = Path.Combine(Path.GetTempPath(), "forge-installer.jar")
+
+            ' Scarica installer
+            Using client As New HttpClient()
+                Using response = Await client.GetAsync(forgeUrl)
+                    Using fileStream = File.Create(installerPath)
+                        Await response.Content.CopyToAsync(fileStream)
+                    End Using
+                End Using
+            End Using
+
+            ' Esegui installer
+            Dim javaPath As String = FindJavaPath()
+            Dim startInfo As New ProcessStartInfo() With {
+                .FileName = javaPath,
+                .Arguments = $"-jar ""{installerPath}"" --installClient --mcDir ""{minecraftDir}""",
+                .UseShellExecute = False,
+                .CreateNoWindow = True,
+                .RedirectStandardOutput = True
+            }
+
+            Using process = process.Start(startInfo)
+                Await process.WaitForExitAsync()
+                Return process.ExitCode = 0
+            End Using
+
+        Catch ex As Exception
+            Console.WriteLine($"Errore installazione Forge: {ex.Message}")
+            Return False
+        End Try
+    End Function
+End Class
