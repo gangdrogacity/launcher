@@ -32,6 +32,16 @@ Public Class MinecraftLauncher
             jvmArgsList.Add($"-Xmx{ramMB}M")
             jvmArgsList.Add($"-Xms{ramMB}M")
 
+            ' aggiungi -XX:+UseG1GC -Dsun.rmi.dgc.server.gcInterval=2147483646 -XX:+UnlockExperimentalVMOptions -XX:G1NewSizePercent=20 -XX:G1ReservePercent=20 -XX:MaxGCPauseMillis=50 -XX:G1HeapRegionSize=32M 
+
+            jvmArgsList.Add("-XX:+UseG1GC")
+            jvmArgsList.Add("-Dsun.rmi.dgc.server.gcInterval=2147483646")
+            jvmArgsList.Add("-XX:+UnlockExperimentalVMOptions")
+            jvmArgsList.Add("-XX:G1NewSizePercent=20")
+            jvmArgsList.Add("-XX:G1ReservePercent=20")
+            jvmArgsList.Add("-XX:MaxGCPauseMillis=50")
+            jvmArgsList.Add("-XX:G1HeapRegionSize=32M")
+
             '' Natives path - Per Forge usa {mcVersion}-{forgeVersion}, NON il nome completo
             '' Per Forge 1.20.1-forge-47.3.33 sarà: C:\...\game\natives\1.20.1-47.3.33\
             Dim nativesVersionName As String = version

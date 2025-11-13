@@ -84,17 +84,18 @@ Public Class Form1
     Private Async Sub boot()
 
         ProgressBar1.Value = 10
+        Dim updater As New UpdateChecker()
 
         If Not Directory.Exists(downloadDir) Then
             Directory.CreateDirectory(downloadDir)
         End If
 
 
-        AddLog(" Avvio...")
+        AddLog("Avvio...")
         Await Task.Delay(1000)
 
         ' Controllo connessione internet iniziale
-        AddLog(" Verifica connessione internet...")
+        AddLog("Verifica connessione internet...")
         Dim connectionCheckCount As Integer = 0
         While Not internet
             errorRed("Non sei connesso a internet. Attendo la rete...")
@@ -107,10 +108,71 @@ Public Class Form1
             End If
         End While
 
-        AddLog(" Connessione a internet rilevata.")
+        AddLog("Connessione a internet rilevata.")
         Await Task.Delay(1000)
         ProgressBar1.Value = 20
+        Dim versionString As String = updater.getLatestversionString()
+        If Await updater.CheckForUpdateAsync() Then
+            AddLog("Aggiornamento del launcher alla versione " & versionString)
+
+
+            Dim link As String = Await updater.GetLatestReleaseUrlAsync()
+
+            ''' ottieni il link dell'asset di nome "GangDrogaCity.exe"
+
+
+            Dim assetLink As String = Await updater.GetAssetDownloadUrlAsync("GangDrogaCity.exe")
+
+
+
+            If assetLink IsNot Nothing Then
+                '''scarica il file exe.temp nella stessa cartella del launcher
+                '''
+
+                Dim tempPath As String = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "GangDrogaCity_temp.exe")
+                Using client As New Net.WebClient()
+                    client.Headers.Add("User-Agent", "GangDrogaCity-Launcher/1.0")
+                    Await DownloadFileTaskAsync(client, New Uri(assetLink), tempPath, True)
+                End Using
+                ''' salva in %temp% un bat che elimina il launcher corrente e rinomina il file scaricato
+                ''' 
+
+                Dim batPath As String = Path.Combine(Path.GetTempPath(), "update_launcher.bat")
+                Dim currentExePath As String = My.Application.Info.DirectoryPath & "\" & My.Application.Info.AssemblyName & ".exe"
+
+                System.IO.File.WriteAllText(batPath, "
+                    @echo off
+                    timeout /t 2 /nobreak > nul
+                    del """ & currentExePath & """ /f /q
+                    ren """ & tempPath & """ """ & My.Application.Info.AssemblyName & ".exe" & """
+                    start "" """ & My.Application.Info.DirectoryPath & "\" & My.Application.Info.AssemblyName & ".exe" & """
+                    del %0
+                    ")
+                ' Esegui il file bat
+                Dim startInfo As New ProcessStartInfo() With {
+                        .FileName = batPath,
+                        .WindowStyle = ProcessWindowStyle.Hidden,
+                        .CreateNoWindow = True,
+                        .UseShellExecute = True
+                    }
+
+                Process.Start(startInfo)
+                ' Chiudi il launcher corrente
+
+
+
+                End
+
+
+
+
+            Else
+                MessageBox.Show("Impossibile recuperare il link per l'aggiornamento. Per favore visita la pagina GitHub del progetto per scaricare l'ultima versione.", "Errore", MessageBoxButtons.OK, MessageBoxIcon.Error)
+            End If
+
+        End If
         step1(False)
+
 
 
 
@@ -123,7 +185,7 @@ Public Class Form1
             Return
         End If
         doNotPowerOffPanel.Visible = True
-        AddLog(" Recupero manifest GDC...")
+        AddLog("Recupero manifest GDC...")
         Await Task.Delay(500)
 
         Try
@@ -133,7 +195,7 @@ Public Class Form1
             ' Ignora errori se i file non esistono
         End Try
 
-        Dim manifestUrl = repoBasepath & "manifest.json"
+        Dim manifestUrl = repoBasepath & "manifest.json?" & New Random(2).ToString()
         Dim manifestPath = Path.Combine(downloadDir, "manifest.json")
 
         Try
@@ -143,10 +205,11 @@ Public Class Form1
 
                 client.CachePolicy = New System.Net.Cache.RequestCachePolicy(System.Net.Cache.RequestCacheLevel.NoCacheNoStore)
 
+
                 Await DownloadFileTaskAsync(client, New Uri(manifestUrl), manifestPath, False)
             End Using
 
-            AddLog(" Analisi file necessari...")
+            AddLog("Analisi file necessari...")
 
             ' Lettura e parsing del manifest
             Dim json As String = Await System.IO.File.ReadAllTextAsync(manifestPath)
@@ -161,7 +224,7 @@ Public Class Form1
             Dim filesToDownload As New List(Of Object)
             Dim alreadyDownloadedSize As Long = 0
 
-            AddLog(" Verifica file esistenti...")
+            AddLog("Verifica file esistenti...")
 
             ' Partiziona i file per processamento parallelo massimo
             Dim maxConcurrency As Integer = Environment.ProcessorCount * 2
@@ -174,8 +237,18 @@ Public Class Form1
                                                          Dim filePath As String = Path.Combine(gameDir, fileName)
                                                          Dim fileSize As Long = content("size").ToObject(Of Long)()
                                                          Dim fileHash As String = content("sha256").ToObject(Of String)()
+                                                         Dim isOnce As Boolean = If(content("once") IsNot Nothing, content("once").ToObject(Of Boolean)(), False)
+                                                         Dim isValid As Boolean
+                                                         If isOnce Then
+                                                             If Not System.IO.File.Exists(filePath & ".once") Then
+                                                                 isValid = False
+                                                             ElseIf Not System.IO.File.Exists(filePath) And System.IO.File.Exists(filePath & ".once") Then
+                                                                 System.IO.File.Copy(filePath & ".once", filePath, True)
+                                                             End If
+                                                         Else
+                                                             isValid = Await VerifyFileWithCacheAsync(filePath, fileSize, fileHash)
 
-                                                         Dim isValid = Await VerifyFileWithCacheAsync(filePath, fileSize, fileHash)
+                                                         End If
 
                                                          Return New With {
                                                              .Content = content,
@@ -183,7 +256,8 @@ Public Class Form1
                                                              .FileSize = fileSize,
                                                              .FileHash = fileHash,
                                                              .FileName = fileName,
-                                                             .IsValid = isValid
+                                                             .IsValid = isValid,
+                                                             .IsOnce = isOnce
                                                          }
                                                      Finally
                                                          semaphore.Release()
@@ -225,7 +299,9 @@ Public Class Form1
                                                                End If
 
                                                                Dim fileUrl As String = repoBasepath & fileInfo.FileName
-
+                                                               If fileInfo.IsOnce Then
+                                                                   fileInfo.FilePath = fileInfo.FilePath & ".once"
+                                                               End If
                                                                Using downloadClient As New Net.WebClient()
                                                                    Await DownloadFileTaskAsync(downloadClient, New Uri(fileUrl), fileInfo.FilePath, False)
                                                                End Using
@@ -251,6 +327,13 @@ Public Class Form1
                                                                End If
 
                                                            Finally
+                                                               If fileInfo.IsOnce And Not System.IO.File.Exists(fileInfo.FilePath.ToString().Replace(".once", "")) Then
+                                                                   Try
+                                                                       System.IO.File.Copy(fileInfo.FilePath, fileInfo.FilePath.ToString().Replace(".once", ""), True)
+                                                                   Catch
+                                                                       ' Ignora errori di copia
+                                                                   End Try
+                                                               End If
                                                                downloadSemaphore.Release()
                                                            End Try
                                                        End Function).ToArray()
@@ -259,7 +342,7 @@ Public Class Form1
             SaveHashCache()
 
             ProgressBar1.Value = 45
-            AddLog(" Download completato!")
+            AddLog("Download completato!")
             Await RemoveAllNonManifestFiles(True)
 
             ' Procedi al passo successivo
@@ -281,7 +364,7 @@ Public Class Form1
     End Sub
 
     Private Async Function RemoveAllNonManifestFiles(Optional excludeMinecraft As Boolean = False) As Task
-        AddLog(" Pulizia file obsoleti...")
+        AddLog("Pulizia file obsoleti...")
         Dim target = gameDir
         If Not Directory.Exists(target) Then
             MessageBox.Show("La directory di gioco non esiste per la pulizia.", "Errore", MessageBoxButtons.OK, MessageBoxIcon.Error)
@@ -303,6 +386,14 @@ Public Class Form1
                 files.Select(Function(f) Path.GetFullPath(Path.Combine(target, f("path").ToObject(Of String)()))),
                 StringComparer.OrdinalIgnoreCase
             )
+            ''escludi i .once
+
+            For Each file In files
+                Dim filePath As String = Path.GetFullPath(Path.Combine(target, file("path").ToObject(Of String)()))
+                If file("once") IsNot Nothing AndAlso file("once").ToObject(Of Boolean)() Then
+                    validFiles.Add(filePath & ".once")
+                End If
+            Next
 
             If excludeMinecraft Then
 
@@ -386,13 +477,13 @@ Public Class Form1
 
         End If
         Try
-            AddLog(" Download Forge installer...")
+            AddLog("Download Forge installer...")
             ProgressBar1.Value = 45
             Await Task.Delay(200)
 
 
 
-            AddLog(" Download Forge installer in corso...")
+            AddLog("Download Forge installer in corso...")
 
             Using forgeClient As New Net.WebClient()
                 forgeClient.Headers.Add("User-Agent", "GangDrogaCity-Launcher/1.0")
@@ -409,7 +500,7 @@ Public Class Form1
 
 
             ProgressBar1.Value = 65
-            AddLog(" Download Forge completato!")
+            AddLog("Download Forge completato!")
             System.IO.File.WriteAllText(Path.Combine(gameDir, "forgeDownloaded"), forgepath)
 
 
@@ -471,7 +562,7 @@ Public Class Form1
 
     Private Async Function step3() As Task
 
-        AddLog(" Installazione di GangDrogaCity " + latestVersion + "...")
+        AddLog("Installazione di GangDrogaCity " + latestVersion + "...")
         ProgressBar1.Value = 65
         Await Task.Delay(500)
 
@@ -483,7 +574,7 @@ Public Class Form1
                     forgepath = System.IO.File.ReadAllText(Path.Combine(gameDir, "forgeDownloaded"))
                 End If
                 ' Download Minecraft in background
-                AddLog(" Download Minecraft...")
+                AddLog("Download Minecraft...")
                 Await Task.Delay(500)
                 Try
                     Await mcDownloader.DownloadMinecraftVersion("1.20.1", gameDir)
@@ -505,7 +596,7 @@ Public Class Form1
                 System.IO.File.Copy(forgepath, Path.Combine(gameDir, "forge-installer.jar"), True)
 
                 ' Installazione Forge asincrona
-                AddLog(" Installazione Forge...")
+                AddLog("Installazione Forge...")
                 Await InstallForgeAsync(javaPath)
                 System.IO.File.WriteAllText(Path.Combine(gameDir, "forgeInstalled"), "true")
 
@@ -546,7 +637,7 @@ Public Class Form1
                                                   ' Salva version.txt in gameDir invece che in minecraftDir
                                                   System.IO.File.WriteAllText(Path.Combine(gameDir, "version.txt"), latestVersion)
                                                   ProgressBar1.Value = 100
-                                                  AddLog(" Installazione completata.")
+                                                  AddLog("Installazione completata.")
                                                   System.IO.File.WriteAllText(Path.Combine(minecraftDir, "forgeInstalled"), "True")
                                               Else
                                                   ' CORRETTO: Non chiamare direttamente metodi asincroni da Invoke
@@ -568,7 +659,7 @@ Public Class Form1
 
 
     Private Async Function step4() As Task
-        AddLog(" Finalizzazione...")
+        AddLog("Finalizzazione...")
 
         '''download libraries in versionData json
         '''
@@ -601,7 +692,7 @@ Public Class Form1
             If result = DialogResult.Yes Then
                 ' Aggiorna UI
                 SafeInvoke(Sub()
-                               AddLog(" Avvio modalità safe-mode...")
+                               AddLog("Avvio modalità safe-mode...")
                                ProgressBar1.Value = 60
                            End Sub)
 
@@ -610,7 +701,7 @@ Public Class Form1
 
                 ' Aggiorna UI
                 SafeInvoke(Sub()
-                               AddLog(" Reinstallazione Minecraft...")
+                               AddLog("Reinstallazione Minecraft...")
                                ProgressBar1.Value = 65
                            End Sub)
 
@@ -620,7 +711,7 @@ Public Class Form1
             Else
                 ' Aggiorna UI
                 SafeInvoke(Sub()
-                               AddLog(" Installazione Forge fallita.")
+                               AddLog("Installazione Forge fallita.")
                                ProgressBar1.Value = 0
                            End Sub)
             End If
@@ -839,7 +930,7 @@ Public Class Form1
 
     Private Function CheckJavaStatusAsync()
         Try
-            Invoke(Sub() AddLog(" Controllo disponibilità Java..."))
+            Invoke(Sub() AddLog("Controllo disponibilità Java..."))
 
             Dim javaPath As String = JavaHelper.FindExistingJava()
 
@@ -851,7 +942,7 @@ Public Class Form1
 
                 Return True
             Else
-                AddLog(" Java non trovato o non valido.")
+                AddLog("Java non trovato o non valido.")
                 Return False
             End If
         Catch ex As Exception
@@ -862,7 +953,7 @@ Public Class Form1
     End Function
 
     Private Function CheckModpackVersion()
-        AddLog(" Controllo versione modpack...")
+        AddLog("Controllo versione modpack...")
         Dim github As New GitHubClient(New ProductHeaderValue("WTF-Modpack-Launcher"))
         latestVersion = github.Repository.Release.GetAll("jamnaga", "wtf-modpack").Result(0).TagName
 
@@ -872,21 +963,21 @@ Public Class Form1
 
         ' Controlla se la directory gameDir esiste
         If Not Directory.Exists(gameDir) Then
-            AddLog(" GameDir non esiste - modpack non installato.")
+            AddLog("GameDir non esiste - modpack non installato.")
             Return False
         End If
 
         ' Controlla se la cartella mods esiste in gameDir (non in minecraftDir)
         Dim modsDir As String = Path.Combine(gameDir, "mods")
         If Not Directory.Exists(modsDir) Then
-            AddLog(" Cartella mods non trovata in gameDir - modpack non installato.")
+            AddLog("Cartella mods non trovata in gameDir - modpack non installato.")
             Return False
         End If
 
         ' Verifica che ci siano effettivamente dei file mod
         Dim modFiles() As String = Directory.GetFiles(modsDir, "*.jar")
         If modFiles.Length = 0 Then
-            AddLog(" Nessun file mod trovato - modpack non installato.")
+            AddLog("Nessun file mod trovato - modpack non installato.")
             Return False
         End If
 
@@ -903,7 +994,7 @@ Public Class Form1
                 AddLog($" Modpack obsoleto (local: {version}, latest: {latestVersion})")
                 Return False
             Else
-                AddLog(" Modpack già aggiornato!")
+                AddLog("Modpack già aggiornato!")
                 Return True
             End If
         Else
@@ -921,15 +1012,15 @@ Public Class Form1
                     ' Sposta il file version.txt nella posizione corretta
                     Try
                         System.IO.File.Copy(fallbackVersionPath, versionFilePath, True)
-                        AddLog(" File version.txt spostato in gameDir per coerenza")
+                        AddLog("File version.txt spostato in gameDir per coerenza")
                     Catch ex As Exception
                         AddLog($" Errore spostamento version.txt: {ex.Message}")
                     End Try
-                    AddLog(" Modpack già aggiornato!")
+                    AddLog("Modpack già aggiornato!")
                     Return True
                 End If
             Else
-                AddLog(" File version.txt non trovato - impossibile verificare versione.")
+                AddLog("File version.txt non trovato - impossibile verificare versione.")
                 Return False
             End If
         End If
@@ -1042,7 +1133,7 @@ Public Class Form1
     ' NUOVO: Verifica l'integrità di tutti i JAR (mod e librerie) e riscarica quelli corrotti
     Private Async Function VerifyAndFixCorruptedJars() As Task
         Try
-            AddLog(" Verifica integrità file JAR...")
+            AddLog("Verifica integrità file JAR...")
             Await Task.Delay(300)
 
             Dim corruptedFiles As New List(Of Object)
@@ -1065,7 +1156,7 @@ Public Class Form1
                             .Sha256 = fileEntry("sha256").ToObject(Of String)()
                         }
                     Next
-                    AddLog(" Manifest caricato per verifica avanzata.")
+                    AddLog("Manifest caricato per verifica avanzata.")
                 Catch
                     ' Se il manifest non è valido, continua con verifica base
                     manifestData = Nothing
@@ -1113,7 +1204,7 @@ Public Class Form1
                         corruptedFiles.Add(New With {.Path = corruptedMod, .RelativePath = relativePath, .Type = "mod"})
                     Next
                 Else
-                    AddLog(" Tutte le mod sono integre.")
+                    AddLog("Tutte le mod sono integre.")
                 End If
             End If
 
@@ -1158,7 +1249,7 @@ Public Class Form1
                         corruptedFiles.Add(New With {.Path = corruptedLib, .RelativePath = relativePath, .Type = "libreria"})
                     Next
                 Else
-                    AddLog(" Tutte le librerie sono integre.")
+                    AddLog("Tutte le librerie sono integre.")
                 End If
             End If
 
@@ -1194,7 +1285,7 @@ Public Class Form1
                     AddLog($" Riparazione completata: {redownloadedCount} file riparati con successo!")
                 End If
             Else
-                AddLog(" Tutti i file JAR sono integri e validi!")
+                AddLog("Tutti i file JAR sono integri e validi!")
             End If
 
         Catch ex As Exception
@@ -1304,7 +1395,7 @@ Public Class Form1
 
 
 
-            If My.Settings.username Is Nothing Then
+            If My.Settings.username.Length < 3 Then
                 playBtn.Text = "PLAY"
                 playBtn.Enabled = True
                 playBtn.BackColor = Color.Green
@@ -1462,7 +1553,7 @@ Public Class Form1
 
     Private Sub menuPanel_VisibleChanged(sender As Object, e As EventArgs) Handles menuPanel.VisibleChanged
         If menuPanel.Visible Then
-            If My.Settings.username IsNot Nothing Then
+            If My.Settings.username.Length > 3 Then
                 userLabel.Text = My.Settings.username
             End If
         End If

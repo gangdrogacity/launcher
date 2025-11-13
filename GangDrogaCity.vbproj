@@ -4,8 +4,9 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <StartupObject>Sub Main</StartupObject>
-    <UseWindowsForms>true</UseWindowsForms>
+    <UseWindowsForms>True</UseWindowsForms>
     <MyType>WindowsForms</MyType>
+    <ApplicationIcon>launcher-Photoroom.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -43,6 +44,10 @@
       <Lcid>0</Lcid>
       <Isolated>false</Isolated>
     </COMReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="launcher-Photoroom.ico" />
   </ItemGroup>
 
   <ItemGroup>

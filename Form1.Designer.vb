@@ -22,6 +22,7 @@ Partial Class Form1
     'Do not modify it using the code editor.
     <System.Diagnostics.DebuggerStepThrough()>
     Private Sub InitializeComponent()
+        Dim resources As System.ComponentModel.ComponentResourceManager = New System.ComponentModel.ComponentResourceManager(GetType(Form1))
         Button1 = New Button()
         PictureBox1 = New PictureBox()
         ProgressBar1 = New ProgressBar()
@@ -59,7 +60,7 @@ Partial Class Form1
         Button1.FlatStyle = FlatStyle.Flat
         Button1.Font = New Font("Segoe UI", 9F, FontStyle.Bold)
         Button1.ForeColor = Color.White
-        Button1.Location = New Point(1297, 9)
+        Button1.Location = New Point(1294, 9)
         Button1.Margin = New Padding(0)
         Button1.Name = "Button1"
         Button1.Size = New Size(39, 23)
@@ -71,40 +72,41 @@ Partial Class Form1
         ' 
         PictureBox1.BackgroundImage = My.Resources.Resources.logo
         PictureBox1.BackgroundImageLayout = ImageLayout.Stretch
-        PictureBox1.Location = New Point(85, 32)
+        PictureBox1.Location = New Point(368, -5)
         PictureBox1.Name = "PictureBox1"
-        PictureBox1.Size = New Size(578, 551)
+        PictureBox1.Size = New Size(578, 587)
         PictureBox1.TabIndex = 1
         PictureBox1.TabStop = False
         ' 
         ' ProgressBar1
         ' 
-        ProgressBar1.Location = New Point(129, 519)
+        ProgressBar1.ForeColor = Color.White
+        ProgressBar1.Location = New Point(0, 581)
         ProgressBar1.Name = "ProgressBar1"
-        ProgressBar1.Size = New Size(503, 10)
+        ProgressBar1.Size = New Size(1338, 19)
         ProgressBar1.TabIndex = 2
         ' 
         ' statusText
         ' 
-        statusText.Anchor = AnchorStyles.Top Or AnchorStyles.Bottom Or AnchorStyles.Left Or AnchorStyles.Right
         statusText.AutoSize = True
-        statusText.Font = New Font("Segoe UI", 12F)
+        statusText.Font = New Font("Segoe UI", 15F)
         statusText.ForeColor = Color.White
-        statusText.Location = New Point(125, 535)
+        statusText.ImageAlign = ContentAlignment.TopCenter
+        statusText.Location = New Point(0, 550)
         statusText.Name = "statusText"
-        statusText.Size = New Size(19, 21)
+        statusText.Size = New Size(24, 28)
         statusText.TabIndex = 3
         statusText.Text = "..."
-        statusText.TextAlign = ContentAlignment.MiddleCenter
+        statusText.TextAlign = ContentAlignment.TopCenter
         ' 
         ' Panel1
         ' 
         Panel1.Controls.Add(ProgressBar1)
         Panel1.Controls.Add(statusText)
         Panel1.Controls.Add(PictureBox1)
-        Panel1.Location = New Point(288, 0)
+        Panel1.Location = New Point(4, 45)
         Panel1.Name = "Panel1"
-        Panel1.Size = New Size(751, 636)
+        Panel1.Size = New Size(1338, 602)
         Panel1.TabIndex = 5
         ' 
         ' menuPanel
@@ -164,9 +166,9 @@ Partial Class Form1
         settingsPanel.Controls.Add(usernameTxt)
         settingsPanel.Controls.Add(Label2)
         settingsPanel.Controls.Add(Label1)
-        settingsPanel.Location = New Point(441, 32)
+        settingsPanel.Location = New Point(443, 125)
         settingsPanel.Name = "settingsPanel"
-        settingsPanel.Size = New Size(433, 146)
+        settingsPanel.Size = New Size(437, 146)
         settingsPanel.TabIndex = 2
         settingsPanel.Visible = False
         ' 
@@ -218,7 +220,7 @@ Partial Class Form1
         ' 
         operationPanel.BackColor = Color.Olive
         operationPanel.Controls.Add(operationText)
-        operationPanel.Location = New Point(368, 508)
+        operationPanel.Location = New Point(368, 6)
         operationPanel.Name = "operationPanel"
         operationPanel.Size = New Size(585, 68)
         operationPanel.TabIndex = 6
@@ -240,7 +242,7 @@ Partial Class Form1
         ' 
         doNotPowerOffPanel.BackColor = Color.Teal
         doNotPowerOffPanel.Controls.Add(Label3)
-        doNotPowerOffPanel.Location = New Point(368, 589)
+        doNotPowerOffPanel.Location = New Point(368, 539)
         doNotPowerOffPanel.Name = "doNotPowerOffPanel"
         doNotPowerOffPanel.Size = New Size(585, 38)
         doNotPowerOffPanel.TabIndex = 7
@@ -313,14 +315,15 @@ Partial Class Form1
         AutoScaleMode = AutoScaleMode.Font
         BackColor = SystemColors.ActiveCaptionText
         ClientSize = New Size(1345, 652)
+        Controls.Add(settingsPanel)
         Controls.Add(crashPanel)
         Controls.Add(operationPanel)
         Controls.Add(doNotPowerOffPanel)
-        Controls.Add(settingsPanel)
+        Controls.Add(Button1)
         Controls.Add(menuPanel)
         Controls.Add(Panel1)
-        Controls.Add(Button1)
         FormBorderStyle = FormBorderStyle.None
+        Icon = CType(resources.GetObject("$this.Icon"), Icon)
         MaximizeBox = False
         Name = "Form1"
         StartPosition = FormStartPosition.CenterScreen
