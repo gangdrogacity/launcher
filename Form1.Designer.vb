@@ -127,7 +127,7 @@ Partial Class Form1
         ' 
         menuPanel.Controls.Add(userLabel)
         menuPanel.Controls.Add(playBtn)
-        menuPanel.Location = New Point(50, 0)
+        menuPanel.Location = New Point(50, 21)
         menuPanel.Name = "menuPanel"
         menuPanel.Size = New Size(1213, 368)
         menuPanel.TabIndex = 6
@@ -234,7 +234,7 @@ Partial Class Form1
         ' 
         operationPanel.BackColor = Color.Olive
         operationPanel.Controls.Add(operationText)
-        operationPanel.Location = New Point(368, 6)
+        operationPanel.Location = New Point(368, 27)
         operationPanel.Name = "operationPanel"
         operationPanel.Size = New Size(585, 68)
         operationPanel.TabIndex = 6

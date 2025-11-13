@@ -47,6 +47,9 @@ Public Class Form1
     ' Cache per le verifiche hash
     Private fileHashCache As New Dictionary(Of String, String)()
 
+    Dim drag As Boolean = False
+    Dim dragOffset As Point
+
 
 
     Private Sub DownloadProgressTimer_Tick(sender As Object, e As EventArgs)
@@ -132,6 +135,7 @@ Public Class Form1
                 Dim tempPath As String = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "GangDrogaCity_temp.exe")
                 Using client As New Net.WebClient()
                     client.Headers.Add("User-Agent", "GangDrogaCity-Launcher/1.0")
+                    client.CachePolicy = New System.Net.Cache.RequestCachePolicy(System.Net.Cache.RequestCacheLevel.NoCacheNoStore)
                     Await DownloadFileTaskAsync(client, New Uri(assetLink), tempPath, True)
                 End Using
                 ''' salva in %temp% un bat che elimina il launcher corrente e rinomina il file scaricato
@@ -886,6 +890,16 @@ Public Class Form1
                                        End Sub
         internetTimer.Interval = 100
         internetTimer.Start()
+
+        Dim timer2 As New System.Windows.Forms.Timer()
+        timer2.Interval = 1
+        AddHandler timer2.Tick, Sub(s, ev)
+                                    If drag Then
+                                        Me.Location = New Point(MousePosition.X - dragOffset.X, MousePosition.Y - dragOffset.Y)
+                                    End If
+                                End Sub
+        timer2.Start()
+
     End Sub
 
     ''' <summary>
@@ -1673,4 +1687,17 @@ Public Class Form1
 
 
     End Sub
+
+
+
+    Private Sub Form1_MouseDown(sender As Object, e As MouseEventArgs) Handles MyBase.MouseDown
+        If e.Button = MouseButtons.Left Then
+            drag = True
+            dragOffset = New Point(e.X, e.Y)
+        End If
+    End Sub
+    Private Sub Form1_MouseUp(sender As Object, e As MouseEventArgs) Handles MyBase.MouseUp
+        drag = False
+    End Sub
+
 End Class
