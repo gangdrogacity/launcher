@@ -28,6 +28,7 @@ Partial Class Form1
         ProgressBar1 = New ProgressBar()
         statusText = New Label()
         Panel1 = New Panel()
+        PictureBox2 = New PictureBox()
         menuPanel = New Panel()
         userLabel = New Label()
         playBtn = New Button()
@@ -48,6 +49,7 @@ Partial Class Form1
         versionLabel = New Label()
         CType(PictureBox1, ComponentModel.ISupportInitialize).BeginInit()
         Panel1.SuspendLayout()
+        CType(PictureBox2, ComponentModel.ISupportInitialize).BeginInit()
         menuPanel.SuspendLayout()
         settingsPanel.SuspendLayout()
         operationPanel.SuspendLayout()
@@ -93,7 +95,7 @@ Partial Class Form1
         statusText.Font = New Font("Segoe UI", 15F)
         statusText.ForeColor = Color.White
         statusText.ImageAlign = ContentAlignment.TopCenter
-        statusText.Location = New Point(0, 550)
+        statusText.Location = New Point(44, 543)
         statusText.Name = "statusText"
         statusText.Size = New Size(24, 28)
         statusText.TabIndex = 3
@@ -102,6 +104,7 @@ Partial Class Form1
         ' 
         ' Panel1
         ' 
+        Panel1.Controls.Add(PictureBox2)
         Panel1.Controls.Add(ProgressBar1)
         Panel1.Controls.Add(statusText)
         Panel1.Controls.Add(PictureBox1)
@@ -109,6 +112,16 @@ Partial Class Form1
         Panel1.Name = "Panel1"
         Panel1.Size = New Size(1338, 602)
         Panel1.TabIndex = 5
+        ' 
+        ' PictureBox2
+        ' 
+        PictureBox2.Image = My.Resources.Resources.original_a5a6bbdebdd0c283b9e2dae1408882bd
+        PictureBox2.Location = New Point(3, 541)
+        PictureBox2.Name = "PictureBox2"
+        PictureBox2.Size = New Size(35, 37)
+        PictureBox2.SizeMode = PictureBoxSizeMode.Zoom
+        PictureBox2.TabIndex = 4
+        PictureBox2.TabStop = False
         ' 
         ' menuPanel
         ' 
@@ -343,6 +356,7 @@ Partial Class Form1
         CType(PictureBox1, ComponentModel.ISupportInitialize).EndInit()
         Panel1.ResumeLayout(False)
         Panel1.PerformLayout()
+        CType(PictureBox2, ComponentModel.ISupportInitialize).EndInit()
         menuPanel.ResumeLayout(False)
         menuPanel.PerformLayout()
         settingsPanel.ResumeLayout(False)
@@ -381,5 +395,6 @@ Partial Class Form1
     Friend WithEvents Button4 As Button
     Friend WithEvents Button3 As Button
     Friend WithEvents versionLabel As Label
+    Friend WithEvents PictureBox2 As PictureBox
 
 End Class
