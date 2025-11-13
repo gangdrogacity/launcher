@@ -45,6 +45,7 @@ Partial Class Form1
         Button3 = New Button()
         Label5 = New Label()
         Label4 = New Label()
+        versionLabel = New Label()
         CType(PictureBox1, ComponentModel.ISupportInitialize).BeginInit()
         Panel1.SuspendLayout()
         menuPanel.SuspendLayout()
@@ -309,12 +310,23 @@ Partial Class Form1
         Label4.Text = "Uh Oh :/"
         Label4.TextAlign = ContentAlignment.MiddleCenter
         ' 
+        ' versionLabel
+        ' 
+        versionLabel.AutoSize = True
+        versionLabel.ForeColor = Color.White
+        versionLabel.Location = New Point(6, 6)
+        versionLabel.Name = "versionLabel"
+        versionLabel.Size = New Size(37, 15)
+        versionLabel.TabIndex = 8
+        versionLabel.Text = "v0.0.0"
+        ' 
         ' Form1
         ' 
         AutoScaleDimensions = New SizeF(7F, 15F)
         AutoScaleMode = AutoScaleMode.Font
         BackColor = SystemColors.ActiveCaptionText
         ClientSize = New Size(1345, 652)
+        Controls.Add(versionLabel)
         Controls.Add(settingsPanel)
         Controls.Add(crashPanel)
         Controls.Add(operationPanel)
@@ -342,6 +354,7 @@ Partial Class Form1
         crashPanel.ResumeLayout(False)
         crashPanel.PerformLayout()
         ResumeLayout(False)
+        PerformLayout()
     End Sub
 
     Friend WithEvents Button1 As Button
@@ -367,5 +380,6 @@ Partial Class Form1
     Friend WithEvents Label5 As Label
     Friend WithEvents Button4 As Button
     Friend WithEvents Button3 As Button
+    Friend WithEvents versionLabel As Label
 
 End Class

@@ -137,7 +137,7 @@ Public Class Form1
                 ''' salva in %temp% un bat che elimina il launcher corrente e rinomina il file scaricato
                 ''' 
 
-                Dim batPath As String = Path.Combine(Path.GetTempPath(), "update_launcher.bat")
+                Dim batPath As String = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "update.bat")
                 Dim currentExePath As String = My.Application.Info.DirectoryPath & "\" & My.Application.Info.AssemblyName & ".exe"
 
                 System.IO.File.WriteAllText(batPath, "
@@ -145,7 +145,7 @@ Public Class Form1
                     timeout /t 2 /nobreak > nul
                     del """ & currentExePath & """ /f /q
                     ren """ & tempPath & """ """ & My.Application.Info.AssemblyName & ".exe" & """
-                    start "" """ & My.Application.Info.DirectoryPath & "\" & My.Application.Info.AssemblyName & ".exe" & """
+                    start " & My.Application.Info.AssemblyName & ".exe" & "
                     del %0
                     ")
                 ' Esegui il file bat
@@ -159,7 +159,7 @@ Public Class Form1
                 Process.Start(startInfo)
                 ' Chiudi il launcher corrente
 
-
+                Await Task.Delay(1500)
 
                 End
 
@@ -862,6 +862,7 @@ Public Class Form1
 
     Private Sub Form1_Load(sender As Object, e As EventArgs) Handles MyBase.Load
         statusText.Text = "Avvio..."
+        versionLabel.Text = "v" & My.Settings.version
         downloadProgressTimer.Interval = 100 ' Aggiorna ogni 100ms
         AddHandler downloadProgressTimer.Tick, AddressOf DownloadProgressTimer_Tick
         Dim timer As New System.Windows.Forms.Timer()
