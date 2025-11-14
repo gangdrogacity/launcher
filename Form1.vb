@@ -134,11 +134,11 @@ Public Class Form1
 
                 Dim tempPath As String = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "GangDrogaCity_new.exe")
 
-                'Using client As New Net.WebClient()
-                'client.Headers.Add("User-Agent", "GangDrogaCity-Launcher/1.0")
-                'client.CachePolicy = New System.Net.Cache.RequestCachePolicy(System.Net.Cache.RequestCacheLevel.NoCacheNoStore)
-                'Await DownloadFileTaskAsync(client, New Uri(assetLink), tempPath, True)
-                'End Using
+                Using client As New Net.WebClient()
+                    client.Headers.Add("User-Agent", "GangDrogaCity-Launcher/1.0")
+                    client.CachePolicy = New System.Net.Cache.RequestCachePolicy(System.Net.Cache.RequestCacheLevel.NoCacheNoStore)
+                    Await DownloadFileTaskAsync(client, New Uri(assetLink), tempPath, True)
+                End Using
 
                 ' Crea un file batch inline come risorsa embedded nel processo
                 Dim currentExePath As String = Process.GetCurrentProcess().MainModule.FileName
