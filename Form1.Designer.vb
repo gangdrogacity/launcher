@@ -30,6 +30,7 @@ Partial Class Form1
         Panel1 = New Panel()
         PictureBox2 = New PictureBox()
         menuPanel = New Panel()
+        Button4 = New Button()
         userLabel = New Label()
         playBtn = New Button()
         Button2 = New Button()
@@ -47,6 +48,7 @@ Partial Class Form1
         Label5 = New Label()
         Label4 = New Label()
         versionLabel = New Label()
+        Button5 = New Button()
         CType(PictureBox1, ComponentModel.ISupportInitialize).BeginInit()
         Panel1.SuspendLayout()
         CType(PictureBox2, ComponentModel.ISupportInitialize).BeginInit()
@@ -125,20 +127,34 @@ Partial Class Form1
         ' 
         ' menuPanel
         ' 
+        menuPanel.Controls.Add(Button4)
         menuPanel.Controls.Add(userLabel)
         menuPanel.Controls.Add(playBtn)
-        menuPanel.Location = New Point(50, 21)
+        menuPanel.Location = New Point(4, 35)
         menuPanel.Name = "menuPanel"
-        menuPanel.Size = New Size(1213, 368)
+        menuPanel.Size = New Size(1338, 498)
         menuPanel.TabIndex = 6
         menuPanel.Visible = False
+        ' 
+        ' Button4
+        ' 
+        Button4.BackColor = Color.FromArgb(CByte(64), CByte(64), CByte(64))
+        Button4.FlatStyle = FlatStyle.Flat
+        Button4.Font = New Font("Segoe UI", 10F, FontStyle.Bold)
+        Button4.ForeColor = Color.White
+        Button4.Location = New Point(1219, 9)
+        Button4.Name = "Button4"
+        Button4.Size = New Size(110, 30)
+        Button4.TabIndex = 7
+        Button4.Text = "Impostazioni"
+        Button4.UseVisualStyleBackColor = False
         ' 
         ' userLabel
         ' 
         userLabel.AutoSize = True
         userLabel.Font = New Font("Segoe UI", 15F)
         userLabel.ForeColor = Color.White
-        userLabel.Location = New Point(3, 9)
+        userLabel.Location = New Point(2, 0)
         userLabel.Name = "userLabel"
         userLabel.Size = New Size(242, 56)
         userLabel.TabIndex = 1
@@ -152,7 +168,7 @@ Partial Class Form1
         playBtn.FlatStyle = FlatStyle.Flat
         playBtn.Font = New Font("Segoe UI", 15F, FontStyle.Bold)
         playBtn.ForeColor = Color.White
-        playBtn.Location = New Point(399, 184)
+        playBtn.Location = New Point(440, 223)
         playBtn.Name = "playBtn"
         playBtn.Size = New Size(420, 100)
         playBtn.TabIndex = 0
@@ -180,7 +196,7 @@ Partial Class Form1
         settingsPanel.Controls.Add(usernameTxt)
         settingsPanel.Controls.Add(Label2)
         settingsPanel.Controls.Add(Label1)
-        settingsPanel.Location = New Point(443, 125)
+        settingsPanel.Location = New Point(434, 125)
         settingsPanel.Name = "settingsPanel"
         settingsPanel.Size = New Size(437, 146)
         settingsPanel.TabIndex = 2
@@ -234,7 +250,7 @@ Partial Class Form1
         ' 
         operationPanel.BackColor = Color.Olive
         operationPanel.Controls.Add(operationText)
-        operationPanel.Location = New Point(368, 27)
+        operationPanel.Location = New Point(368, 35)
         operationPanel.Name = "operationPanel"
         operationPanel.Size = New Size(585, 68)
         operationPanel.TabIndex = 6
@@ -333,19 +349,34 @@ Partial Class Form1
         versionLabel.TabIndex = 8
         versionLabel.Text = "v0.0.0"
         ' 
+        ' Button5
+        ' 
+        Button5.BackColor = Color.Teal
+        Button5.FlatStyle = FlatStyle.Flat
+        Button5.Font = New Font("Segoe UI", 8F, FontStyle.Bold)
+        Button5.ForeColor = Color.White
+        Button5.Location = New Point(1246, 9)
+        Button5.Margin = New Padding(0)
+        Button5.Name = "Button5"
+        Button5.Size = New Size(39, 23)
+        Button5.TabIndex = 9
+        Button5.Text = "__"
+        Button5.UseVisualStyleBackColor = False
+        ' 
         ' Form1
         ' 
         AutoScaleDimensions = New SizeF(7F, 15F)
         AutoScaleMode = AutoScaleMode.Font
         BackColor = SystemColors.ActiveCaptionText
         ClientSize = New Size(1345, 652)
+        Controls.Add(Button5)
+        Controls.Add(Button1)
         Controls.Add(versionLabel)
         Controls.Add(settingsPanel)
         Controls.Add(crashPanel)
         Controls.Add(operationPanel)
-        Controls.Add(doNotPowerOffPanel)
-        Controls.Add(Button1)
         Controls.Add(menuPanel)
+        Controls.Add(doNotPowerOffPanel)
         Controls.Add(Panel1)
         FormBorderStyle = FormBorderStyle.None
         Icon = CType(resources.GetObject("$this.Icon"), Icon)
@@ -396,5 +427,6 @@ Partial Class Form1
     Friend WithEvents Button3 As Button
     Friend WithEvents versionLabel As Label
     Friend WithEvents PictureBox2 As PictureBox
+    Friend WithEvents Button5 As Button
 
 End Class

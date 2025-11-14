@@ -17,7 +17,7 @@ Public Class Form1
 
     Dim repobranch As String = "styleupdate"
     Dim data = "https://github.com/jamnaga/wtf-modpack/archive/refs/heads/" & repobranch & ".zip"
-    Dim repoBasepath As String = "https://raw.githubusercontent.com/jamnaga/wtf-modpack/refs/heads/styleupdate/"
+    Dim repoBasepath As String = "https://raw.githubusercontent.com/jamnaga/wtf-modpack/refs/heads/" & repobranch & "/"
 
     Dim zipPath As String = Path.Combine(downloadDir, "modpack.zip")
     Dim forgepath As String = Path.Combine(downloadDir, "forge-installer.jar")
@@ -79,7 +79,7 @@ Public Class Form1
     End Sub
 
     Private Sub Button1_Click(sender As Object, e As EventArgs) Handles Button1.Click
-        Me.Close()
+        Close()
     End Sub
 
     Dim downloading As Boolean = True
@@ -132,39 +132,68 @@ Public Class Form1
                 '''scarica il file exe.temp nella stessa cartella del launcher
                 '''
 
-                Dim tempPath As String = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "GangDrogaCity_temp.exe")
-                Using client As New Net.WebClient()
-                    client.Headers.Add("User-Agent", "GangDrogaCity-Launcher/1.0")
-                    client.CachePolicy = New System.Net.Cache.RequestCachePolicy(System.Net.Cache.RequestCacheLevel.NoCacheNoStore)
-                    Await DownloadFileTaskAsync(client, New Uri(assetLink), tempPath, True)
-                End Using
-                ''' salva in %temp% un bat che elimina il launcher corrente e rinomina il file scaricato
-                ''' 
+                Dim tempPath As String = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "GangDrogaCity_new.exe")
 
-                Dim batPath As String = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "update.bat")
-                Dim currentExePath As String = My.Application.Info.DirectoryPath & "\" & My.Application.Info.AssemblyName & ".exe"
+                'Using client As New Net.WebClient()
+                'client.Headers.Add("User-Agent", "GangDrogaCity-Launcher/1.0")
+                'client.CachePolicy = New System.Net.Cache.RequestCachePolicy(System.Net.Cache.RequestCacheLevel.NoCacheNoStore)
+                'Await DownloadFileTaskAsync(client, New Uri(assetLink), tempPath, True)
+                'End Using
 
-                System.IO.File.WriteAllText(batPath, "
-                    @echo off
-                    timeout /t 2 /nobreak > nul
-                    del """ & currentExePath & """ /f /q
-                    ren """ & tempPath & """ """ & My.Application.Info.AssemblyName & ".exe" & """
-                    start " & My.Application.Info.AssemblyName & ".exe" & "
-                    del %0
-                    ")
-                ' Esegui il file bat
+                ' Crea un file batch inline come risorsa embedded nel processo
+                Dim currentExePath As String = Process.GetCurrentProcess().MainModule.FileName
+                Dim currentPid As Integer = Process.GetCurrentProcess().Id
+                Dim batchPath As String = Path.Combine(Path.GetTempPath(), "update_gdc_" & Guid.NewGuid().ToString("N").Substring(0, 8) & ".cmd")
+
+                ' Crea batch che aspetta, sostituisce e riavvia
+                Dim batchContent As String = String.Format(
+                    "@echo off" & vbCrLf &
+                    "title Aggiornamento GangDrogaCity Launcher" & vbCrLf &
+                    "echo Attendo chiusura del launcher..." & vbCrLf &
+                    ":WAIT" & vbCrLf &
+                    "tasklist /FI ""PID eq {0}"" 2>NUL | find ""{0}"" >NUL" & vbCrLf &
+                    "if not errorlevel 1 (" & vbCrLf &
+                    "  timeout /t 1 /nobreak >NUL" & vbCrLf &
+                    "  goto WAIT" & vbCrLf &
+                    ")" & vbCrLf &
+                    "echo Aggiornamento in corso..." & vbCrLf &
+                    "timeout /t 2 /nobreak >NUL" & vbCrLf &
+                    "del /f /q ""{1}""" & vbCrLf &
+                    "timeout /t 1 /nobreak >NUL" & vbCrLf &
+                    "move /y ""{2}"" ""{1}""" & vbCrLf &
+                    "if errorlevel 1 (" & vbCrLf &
+                    "  echo Errore durante l'aggiornamento!" & vbCrLf &
+                    "  pause" & vbCrLf &
+                    "  exit /b 1" & vbCrLf &
+                    ")" & vbCrLf &
+                    "echo Avvio nuova versione..." & vbCrLf &
+                    "timeout /t 1 /nobreak >NUL" & vbCrLf &
+                    "start """" ""{1}""" & vbCrLf &
+                    "timeout /t 2 /nobreak >NUL" & vbCrLf &
+                    "del /f /q ""{3}""" & vbCrLf &
+                    "exit",
+                    currentPid,
+                    currentExePath,
+                    tempPath,
+                    batchPath
+                )
+
+                System.IO.File.WriteAllText(batchPath, batchContent)
+
+                ' Avvia il batch in modo che continui dopo la chiusura
                 Dim startInfo As New ProcessStartInfo() With {
-                        .FileName = batPath,
-                        .WindowStyle = ProcessWindowStyle.Hidden,
-                        .CreateNoWindow = True,
-                        .UseShellExecute = True
-                    }
+                    .FileName = batchPath,
+                    .UseShellExecute = True,
+                    .WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory,
+                    .WindowStyle = ProcessWindowStyle.Normal,
+                    .CreateNoWindow = False
+                }
 
                 Process.Start(startInfo)
+
                 ' Chiudi il launcher corrente
-
-                Await Task.Delay(1500)
-
+                AddLog("Riavvio per completare l'aggiornamento...")
+                Await Task.Delay(1000)
                 End
 
 
@@ -1650,7 +1679,7 @@ Public Class Form1
         '''carica il crashpath
         '''
 
-        Dim client As New WebClient()
+        Dim client As New WebClient
         Try
 
             ''set PUT request
@@ -1661,14 +1690,14 @@ Public Class Form1
 
 
 
-            Dim response As Byte() = client.UploadData("https://drop.stefanodeblasi.it/upload/", "PUT", System.IO.File.ReadAllBytes(crashPath))
+            Dim response = client.UploadData("https://drop.stefanodeblasi.it/upload/", "PUT", File.ReadAllBytes(crashPath))
 
-            Dim responseString As String = System.Text.Encoding.UTF8.GetString(response)
-            Dim jsonResponse As Newtonsoft.Json.Linq.JObject = Newtonsoft.Json.Linq.JObject.Parse(responseString)
-            Dim fileUrl As String = jsonResponse("url").ToString()
-            System.IO.File.WriteAllText(Path.Combine(gameDir, "last_report_url.txt"), fileUrl)
+            Dim responseString = System.Text.Encoding.UTF8.GetString(response)
+            Dim jsonResponse = Newtonsoft.Json.Linq.JObject.Parse(responseString)
+            Dim fileUrl = jsonResponse("url").ToString
+            File.WriteAllText(Path.Combine(gameDir, "last_report_url.txt"), fileUrl)
 
-            Dim result As DialogResult = MessageBox.Show($"Log caricato con successo! Copiare il link negli appunti?{Environment.NewLine}{fileUrl}", "Upload completato", MessageBoxButtons.YesNo, MessageBoxIcon.Information)
+            Dim result = MessageBox.Show($"Log caricato con successo! Copiare il link negli appunti?{Environment.NewLine}{fileUrl}", "Upload completato", MessageBoxButtons.YesNo, MessageBoxIcon.Information)
             If result = DialogResult.Yes Then
                 Clipboard.SetText(fileUrl)
             End If
@@ -1700,4 +1729,12 @@ Public Class Form1
         drag = False
     End Sub
 
+    Private Sub Button4_Click(sender As Object, e As EventArgs) Handles Button4.Click
+        menuPanel.Visible = False
+        settingsPanel.Visible = True
+    End Sub
+
+    Private Sub Button5_Click(sender As Object, e As EventArgs) Handles Button5.Click
+        Me.WindowState = FormWindowState.Minimized
+    End Sub
 End Class
