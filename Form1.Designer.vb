@@ -272,7 +272,7 @@ Partial Class Form1
         ' 
         doNotPowerOffPanel.BackColor = Color.Teal
         doNotPowerOffPanel.Controls.Add(Label3)
-        doNotPowerOffPanel.Location = New Point(368, 539)
+        doNotPowerOffPanel.Location = New Point(368, 503)
         doNotPowerOffPanel.Name = "doNotPowerOffPanel"
         doNotPowerOffPanel.Size = New Size(585, 38)
         doNotPowerOffPanel.TabIndex = 7
@@ -372,11 +372,11 @@ Partial Class Form1
         Controls.Add(Button5)
         Controls.Add(Button1)
         Controls.Add(versionLabel)
+        Controls.Add(doNotPowerOffPanel)
+        Controls.Add(operationPanel)
         Controls.Add(settingsPanel)
         Controls.Add(crashPanel)
-        Controls.Add(operationPanel)
         Controls.Add(menuPanel)
-        Controls.Add(doNotPowerOffPanel)
         Controls.Add(Panel1)
         FormBorderStyle = FormBorderStyle.None
         Icon = CType(resources.GetObject("$this.Icon"), Icon)

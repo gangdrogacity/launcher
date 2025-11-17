@@ -428,6 +428,29 @@ Public Class Form1
                 End If
             Next
 
+            '''escludi tutti i file nel .gitignore
+            '''
+
+            Dim gitignorePath As String = Path.Combine(downloadDir, ".gitignore")
+            If System.IO.File.Exists(gitignorePath) Then
+                Dim gitignoreLines = System.IO.File.ReadAllLines(gitignorePath)
+                For Each line In gitignoreLines
+                    Dim trimmedLine = line.Trim()
+                    If Not String.IsNullOrEmpty(trimmedLine) AndAlso Not trimmedLine.StartsWith("#") Then
+                        Dim ignorePath = Path.GetFullPath(Path.Combine(target, trimmedLine))
+                        If Directory.Exists(ignorePath) Then
+                            Dim allIgnoreFiles = Directory.GetFiles(ignorePath, "*", SearchOption.AllDirectories)
+                            For Each file In allIgnoreFiles
+                                Dim fullPath = Path.GetFullPath(file)
+                                validFiles.Add(fullPath)
+                            Next
+                        ElseIf File.Exists(ignorePath) Then
+                            validFiles.Add(ignorePath)
+                        End If
+                    End If
+                Next
+            End If
+
             If excludeMinecraft Then
 
                 ''aggiunggi assets, versions, libraries e mods/mcef-libraries
