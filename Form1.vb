@@ -121,24 +121,38 @@ Public Class Form1
 
             Dim link As String = Await updater.GetLatestReleaseUrlAsync()
 
-            ''' ottieni il link dell'asset di nome "GangDrogaCity.exe"
+            ''' ottieni il link dell'asset di nome "GangDrogaCity.7z"
 
 
-            Dim assetLink As String = Await updater.GetAssetDownloadUrlAsync("GangDrogaCity.exe")
+            Dim assetLink As String = Await updater.GetAssetDownloadUrlAsync("GangDrogaCity.7z")
 
 
 
             If assetLink IsNot Nothing Then
-                '''scarica il file exe.temp nella stessa cartella del launcher
+                '''scarica il file .7z nella stessa cartella del launcher
                 '''
 
-                Dim tempPath As String = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "GangDrogaCity_new.exe")
+                Dim temp7zPath As String = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "GangDrogaCity_update.7z")
+                Dim tempExtractDir As String = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "update_temp")
+                Dim tempPath As String = Path.Combine(tempExtractDir, "GangDrogaCity.exe")
 
                 Using client As New Net.WebClient()
                     client.Headers.Add("User-Agent", "GangDrogaCity-Launcher/1.0")
                     client.CachePolicy = New System.Net.Cache.RequestCachePolicy(System.Net.Cache.RequestCacheLevel.NoCacheNoStore)
-                    Await DownloadFileTaskAsync(client, New Uri(assetLink), tempPath, True)
+                    AddLog("Download archivio aggiornamento...")
+                    Await DownloadFileTaskAsync(client, New Uri(assetLink), temp7zPath, True)
                 End Using
+
+                ' Estrai l'archivio 7z
+                AddLog("Estrazione aggiornamento...")
+                Await Extract7zAsync(temp7zPath, tempExtractDir)
+                Dim zrPath As String = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "7zr.exe")
+
+                ' Verifica che l'eseguibile sia stato estratto
+                If Not File.Exists(tempPath) Then
+                    MessageBox.Show("Errore durante l'estrazione dell'aggiornamento: file GangDrogaCity.exe non trovato nell'archivio.", "Errore", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                    Return
+                End If
 
                 ' Crea un file batch inline come risorsa embedded nel processo
                 Dim currentExePath As String = Process.GetCurrentProcess().MainModule.FileName
@@ -166,16 +180,24 @@ Public Class Form1
                     "  pause" & vbCrLf &
                     "  exit /b 1" & vbCrLf &
                     ")" & vbCrLf &
+                    "echo Pulizia file temporanei..." & vbCrLf &
+                    "timeout /t 1 /nobreak >NUL" & vbCrLf &
+                    "del /f /q ""{4}""" & vbCrLf &
+                    "rmdir /s /q ""{5}""" & vbCrLf &
                     "echo Avvio nuova versione..." & vbCrLf &
                     "timeout /t 1 /nobreak >NUL" & vbCrLf &
                     "start """" ""{1}""" & vbCrLf &
                     "timeout /t 2 /nobreak >NUL" & vbCrLf &
                     "del /f /q ""{3}""" & vbCrLf &
+                    "del /f /q ""{6}""" & vbCrLf &
                     "exit",
                     currentPid,
                     currentExePath,
                     tempPath,
-                    batchPath
+                    batchPath,
+                    temp7zPath,
+                    tempExtractDir,
+                    zrPath
                 )
 
                 System.IO.File.WriteAllText(batchPath, batchContent)
@@ -905,6 +927,84 @@ Public Class Form1
                                Next
                            End Using
                        End Sub)
+    End Function
+
+    ''' <summary>
+    ''' Estrae un archivio 7z usando 7-Zip
+    ''' </summary>
+    Private Async Function Extract7zAsync(archivePath As String, extractPath As String) As Task
+        Try
+            ' Crea la directory di destinazione se non esiste
+            If Not Directory.Exists(extractPath) Then
+                Directory.CreateDirectory(extractPath)
+            End If
+
+            ' Scarica 7zr.exe se non esiste
+            Dim sevenZipPath As String = Await EnsureSevenZipAsync()
+
+            If String.IsNullOrEmpty(sevenZipPath) OrElse Not File.Exists(sevenZipPath) Then
+                Throw New Exception("Impossibile scaricare o trovare 7zr.exe.")
+            End If
+
+            ' Comando: 7zr.exe x "archivio.7z" -o"destinazione" -y
+            Await Task.Run(Sub()
+                               Dim startInfo As New ProcessStartInfo() With {
+                                   .FileName = sevenZipPath,
+                                   .Arguments = $"x ""{archivePath}"" -o""{extractPath}"" -y",
+                                   .UseShellExecute = False,
+                                   .CreateNoWindow = True,
+                                   .RedirectStandardOutput = True,
+                                   .RedirectStandardError = True
+                               }
+
+                               Using process As Process = Process.Start(startInfo)
+                                   process.WaitForExit()
+
+                                   If process.ExitCode <> 0 Then
+                                       Dim errorOutput As String = process.StandardError.ReadToEnd()
+                                       Throw New Exception($"Errore durante l'estrazione 7z (Exit Code: {process.ExitCode}). Dettagli: {errorOutput}")
+                                   End If
+                               End Using
+                           End Sub)
+
+            SafeInvoke(Sub() AddLog("Estrazione completata con successo."))
+
+        Catch ex As Exception
+            SafeInvoke(Sub()
+                           MessageBox.Show($"Errore durante l'estrazione dell'archivio: {ex.Message}", "Errore estrazione", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                       End Sub)
+            Throw
+        End Try
+    End Function
+
+    ''' <summary>
+    ''' Assicura che 7zr.exe sia disponibile, scaricandolo se necessario
+    ''' </summary>
+    Private Async Function EnsureSevenZipAsync() As Task(Of String)
+        Try
+            Dim baseDir As String = AppDomain.CurrentDomain.BaseDirectory
+            Dim sevenZipPath As String = Path.Combine(baseDir, "7zr.exe")
+
+            ' Se esiste già, restituisci il percorso
+            If File.Exists(sevenZipPath) Then
+                Return sevenZipPath
+            End If
+
+            ' Scarica 7zr.exe da 7-zip.org
+            SafeInvoke(Sub() AddLog("Download 7z Runtime..."))
+
+            Using webClient As New Net.WebClient()
+                webClient.Headers.Add("User-Agent", "GangDrogaCity-Launcher/1.0")
+                Await webClient.DownloadFileTaskAsync(New Uri("https://www.7-zip.org/a/7zr.exe"), sevenZipPath)
+            End Using
+
+            SafeInvoke(Sub() AddLog("7z Runtime pronto."))
+            Return sevenZipPath
+
+        Catch ex As Exception
+            Console.WriteLine($"Errore durante il download di 7zr.exe: {ex.Message}")
+            Return Nothing
+        End Try
     End Function
 
     Private Sub errorRed(text)
