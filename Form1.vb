@@ -244,13 +244,13 @@ Public Class Form1
         Await Task.Delay(500)
 
         Try
+            ' Pulisci solo il file zip del modpack (il resto viene gestito dai marker)
             System.IO.File.Delete(zipPath)
-            System.IO.File.Delete(forgepath)
         Catch
-            ' Ignora errori se i file non esistono
+            ' Ignora errori se il file non esiste
         End Try
 
-        Dim manifestUrl = repoBasepath & "manifest.json?" & New Random(2).ToString()
+        Dim manifestUrl = repoBasepath & "manifest.json"
         Dim manifestPath = Path.Combine(downloadDir, "manifest.json")
 
         Try
@@ -546,13 +546,36 @@ Public Class Form1
 
     ' Step2 completamente rivisitato e ottimizzato
     Private Async Function step2() As Task
-        If File.Exists(Path.Combine(gameDir, "forgeDownloaded")) Then
-            If File.Exists(System.IO.File.ReadAllText(Path.Combine(gameDir, "forgeDownloaded"))) Then
+        Dim forgeDownloadedMarker As String = Path.Combine(gameDir, "forgeDownloaded")
+        
+        ' Verifica se Forge è già stato scaricato (controlla marker E file di default)
+        If File.Exists(forgeDownloadedMarker) Then
+            Dim cachedForgePath As String = File.ReadAllText(forgeDownloadedMarker).Trim()
+            If Not String.IsNullOrEmpty(cachedForgePath) AndAlso File.Exists(cachedForgePath) Then
+                AddLog($"✓ Forge già scaricato: {Path.GetFileName(cachedForgePath)}")
+                forgepath = cachedForgePath
                 ProgressBar1.Value = 65
                 Await step3()
                 Return
+            Else
+                ' File marker corrotto o file cancellato, rimuovo marker
+                AddLog("⚠ Marker Forge corrotto, riscarico...")
+                File.Delete(forgeDownloadedMarker)
             End If
-
+        ElseIf File.Exists(forgepath) Then
+            ' Il file esiste nella posizione di default, ma non c'è marker
+            Dim fileInfo As New FileInfo(forgepath)
+            If fileInfo.Length > 1000000 Then ' Almeno 1MB
+                AddLog($"✓ Forge trovato in cache: {Path.GetFileName(forgepath)}")
+                File.WriteAllText(forgeDownloadedMarker, forgepath)
+                ProgressBar1.Value = 65
+                Await step3()
+                Return
+            Else
+                ' File corrotto, elimino
+                AddLog("⚠ File Forge corrotto, riscarico...")
+                File.Delete(forgepath)
+            End If
         End If
         Try
             AddLog("Download Forge installer...")
@@ -646,10 +669,14 @@ Public Class Form1
 
         ProgressBar1.Value = 75
 
-        If Not File.Exists("forgeInstalled") Then
+        Dim forgeInstalledMarker As String = Path.Combine(gameDir, "forgeInstalled")
+        
+        If Not File.Exists(forgeInstalledMarker) Then
             Try
-                If File.Exists(Path.Combine(gameDir, "forgeDownloaded")) Then
-                    forgepath = System.IO.File.ReadAllText(Path.Combine(gameDir, "forgeDownloaded"))
+                ' Recupera il path di Forge dal marker di download
+                Dim forgeDownloadedMarker As String = Path.Combine(gameDir, "forgeDownloaded")
+                If File.Exists(forgeDownloadedMarker) Then
+                    forgepath = File.ReadAllText(forgeDownloadedMarker).Trim()
                 End If
                 ' Download Minecraft in background
                 AddLog("Download Minecraft...")
@@ -676,7 +703,7 @@ Public Class Form1
                 ' Installazione Forge asincrona
                 AddLog("Installazione Forge...")
                 Await InstallForgeAsync(javaPath)
-                System.IO.File.WriteAllText(Path.Combine(gameDir, "forgeInstalled"), "true")
+                ' Il marker forgeInstalled viene scritto dentro InstallForgeAsync se successo
 
             Catch ex As Exception
                 errorRed($" Errore durante installazione: {ex.Message}")
@@ -693,7 +720,9 @@ Public Class Form1
 
     ' Installazione Forge asincrona - CORRETTO per evitare blocco UI
     Private Async Function InstallForgeAsync(javaPath As String) As Task
-        If Not File.Exists(Path.Combine(gameDir, "forgeInstalled")) Then
+        Dim forgeInstalledMarker As String = Path.Combine(gameDir, "forgeInstalled")
+        
+        If Not File.Exists(forgeInstalledMarker) Then
             Await Task.Run(Sub()
 
                                Dim batPath As String = Path.Combine(gameDir, "install_forge.bat")
@@ -712,11 +741,11 @@ Public Class Form1
                                    Invoke(Sub()
                                               If forgeProcess.ExitCode = 0 Then
                                                   Console.WriteLine("Forge installato correttamente!")
-                                                  ' Salva version.txt in gameDir invece che in minecraftDir
+                                                  ' Salva version.txt e marker forgeInstalled in gameDir
                                                   System.IO.File.WriteAllText(Path.Combine(gameDir, "version.txt"), latestVersion)
+                                                  System.IO.File.WriteAllText(Path.Combine(gameDir, "forgeInstalled"), "True")
                                                   ProgressBar1.Value = 100
                                                   AddLog("Installazione completata.")
-                                                  System.IO.File.WriteAllText(Path.Combine(minecraftDir, "forgeInstalled"), "True")
                                               Else
                                                   ' CORRETTO: Non chiamare direttamente metodi asincroni da Invoke
                                                   Task.Run(Async Function()
@@ -739,11 +768,16 @@ Public Class Form1
     Private Async Function step4() As Task
         AddLog("Finalizzazione...")
 
-        '''download libraries in versionData json
-        '''
+        ' Verifica integrità JAR (mod e librerie)
         Await VerifyAndFixCorruptedJars()
-        Await mcDownloader.DownloadVersionDependencies("1.20.1", gameDir)
+        
+        ' CRITICO: Verifica e scarica TUTTI i componenti di Minecraft vanilla
+        ' Questo include: client.jar, assets (audio + lingue), librerie vanilla
+        AddLog("Verifica completezza Minecraft vanilla...")
+        Await mcDownloader.DownloadMinecraftVersion("1.20.1", gameDir)
 
+        ' Scarica SOLO le librerie specifiche di Forge (forge-client.jar, forge-universal.jar, ecc.)
+        AddLog("Verifica librerie Forge...")
         Await mcDownloader.DownloadVersionDependencies("1.20.1-forge-47.3.33", gameDir)
 
 
@@ -1573,9 +1607,13 @@ Public Class Form1
                 Return
             End If
 
-            ' Verifica e riscarica JAR corrotti (mod e librerie)
+            ' Verifica e riscarica componenti Minecraft mancanti
+            ' IMPORTANTE: Questo verifica e scarica assets vanilla mancanti (suoni, lingue)
+            AddLog("Verifica completezza Minecraft vanilla...")
+            Await mcDownloader.DownloadMinecraftVersion("1.20.1", gameDir)
 
-
+            ' Verifica librerie Forge
+            AddLog("Verifica librerie Forge...")
             Await mcDownloader.DownloadVersionDependencies("1.20.1-forge-47.3.33", gameDir)
 
             mcTask = Await mcLauncher.LaunchMinecraft(My.Settings.username, "1.20.1-forge-47.3.33", gameDir, 4096)
@@ -1738,8 +1776,11 @@ Public Class Form1
             If Directory.Exists(gameDir) Then
                 Try
                     Await RemoveAllNonManifestFiles()
+                    ' Rimuovi tutti i marker di stato
                     File.Delete(Path.Combine(gameDir, "version.txt"))
                     File.Delete(Path.Combine(gameDir, "forgeInstalled"))
+                    File.Delete(Path.Combine(gameDir, "forgeDownloaded"))
+                    ' Rimuovi anche eventuali marker vecchi in minecraftDir (legacy)
                     File.Delete(Path.Combine(minecraftDir, "forgeInstalled"))
                     File.Delete(Path.Combine(minecraftDir, "forgeDownloaded"))
                     menuPanel.Visible = False

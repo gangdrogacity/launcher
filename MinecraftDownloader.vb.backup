@@ -1,0 +1,1003 @@
+﻿Imports System.Net.Http
+Imports System.IO
+Imports Newtonsoft.Json
+Imports Newtonsoft.Json.Linq
+Imports System.Threading
+Imports System.Security.Cryptography
+Imports System.Linq
+Imports System.Net
+
+Public Class MinecraftDownloader
+    Private Shared ReadOnly httpClient As New HttpClient()
+
+    ' Cache per evitare re-download di manifest
+    Private Shared manifestCache As JObject = Nothing
+    Private Shared lastManifestUpdate As DateTime = DateTime.MinValue
+
+    Public Async Function DownloadMinecraftVersion(version As String, minecraftDir As String) As Task(Of Boolean)
+        Try
+            Form1.AddLog($"🔍 Verifica installazione Minecraft {version}...")
+
+            ' Verifica completa se tutto è già installato
+            Form1.AddLog("  Controllo completezza installazione...")
+            If Await IsVersionCompletelyInstalledAsync(version, minecraftDir) Then
+                Form1.AddLog("✓ Minecraft già completamente installato e verificato!")
+                Return True
+            End If
+            
+            Form1.AddLog("  Installazione incompleta, procedo con download componenti mancanti...")
+
+            ' Ottieni manifest con cache
+            Dim manifest As JObject = Await GetVersionManifestAsync()
+
+            ' Trova informazioni versione
+            Dim versionInfo As JObject = FindVersionInfo(manifest, version)
+            Dim versionUrl As String
+
+            Try
+                versionUrl = versionInfo("url").ToString()
+            Catch ex As NullReferenceException
+
+            End Try
+
+
+            ' Scarica JSON versione con cache
+            Dim versionData As JObject = Await GetVersionDataAsync(versionUrl, version, minecraftDir)
+
+            ' Download intelligente solo di ciò che manca
+            Dim downloadTasks As New List(Of Task(Of Boolean))
+            Dim jarTask As Task(Of Boolean)
+
+            ' Verifica e scarica solo se necessario
+            If Not Await IsClientJarValidAsync(versionData, version, minecraftDir) Then
+                jarTask = DownloadClientJarAsync(versionData, version, minecraftDir)
+
+                Await jarTask
+
+
+            Else
+                Form1.AddLog("✓ Client.jar già presente e valido")
+            End If
+
+            Form1.AddLog("  Controllo assets...")
+            If Not Await AreAssetsCompleteAsync(versionData, minecraftDir) Then
+                Form1.AddLog("  → Aggiunta task download assets")
+                downloadTasks.Add(DownloadAssetsAsync(versionData, minecraftDir))
+            Else
+                Form1.AddLog("✓ Assets già completi")
+            End If
+
+            Form1.AddLog("  Controllo librerie...")
+            If Not Await AreLibrariesCompleteAsync(versionData, minecraftDir) Then
+                Form1.AddLog("  → Aggiunta task download librerie")
+                downloadTasks.Add(DownloadLibrariesAsync(versionData, minecraftDir))
+            Else
+                Form1.AddLog("✓ Librerie già complete")
+            End If
+
+            ' Se non c'è nulla da scaricare
+            If downloadTasks.Count = 0 Then
+                Form1.AddLog("✓ Tutti i componenti di Minecraft sono già presenti!")
+                Return True
+            End If
+
+            Form1.AddLog($"📥 Avvio {downloadTasks.Count} task di download...")
+
+            ' Aspetta completamento solo dei download necessari
+            Dim results = Await Task.WhenAll(downloadTasks)
+
+            ' Verifica che tutti i download siano riusciti
+            If results.All(Function(r) r) Then
+                Form1.AddLog("Download Minecraft completato con successo!")
+                Return True
+            Else
+                Form1.AddLog("Alcuni download sono falliti!")
+                Return False
+            End If
+
+        Catch ex As Exception
+            Form1.AddLog($"Errore download Minecraft: {ex.Message}")
+            Console.WriteLine($"Errore download Minecraft: {ex.Message}")
+            Return False
+        End Try
+    End Function
+
+    ' Verifica completa e dettagliata se tutto è installato
+    Private Async Function IsVersionCompletelyInstalledAsync(version As String, minecraftDir As String) As Task(Of Boolean)
+        Try
+            Form1.SafeInvoke(Sub() Form1.AddLog("  Verifica file base..."))
+            
+            ' Prima controlla i file base
+            Dim versionDir = Path.Combine(minecraftDir, "versions", version)
+            Dim clientJar = Path.Combine(versionDir, $"{version}.jar")
+            Dim versionJson = Path.Combine(versionDir, $"{version}.json")
+
+            If Not File.Exists(clientJar) Or Not File.Exists(versionJson) Then
+                Form1.SafeInvoke(Sub() Form1.AddLog("  ✗ File base mancanti"))
+                Return False
+            End If
+
+            ' Carica version.json per verifiche dettagliate
+            Dim versionData As JObject
+            Try
+                Dim jsonContent = File.ReadAllText(versionJson)
+                versionData = JsonConvert.DeserializeObject(Of JObject)(jsonContent)
+            Catch ex As Exception
+                Form1.SafeInvoke(Sub() Form1.AddLog($"  ✗ Errore lettura version.json: {ex.Message}"))
+                Return False
+            End Try
+
+            ' Verifica dettagliata di tutti i componenti in parallelo
+            Dim verificationTasks = {
+                IsClientJarValidAsync(versionData, version, minecraftDir),
+                AreAssetsCompleteAsync(versionData, minecraftDir),
+                AreLibrariesCompleteAsync(versionData, minecraftDir)
+            }
+
+            Dim results = Await Task.WhenAll(verificationTasks)
+            Dim allComplete = results.All(Function(r) r)
+            
+            If allComplete Then
+                Form1.SafeInvoke(Sub() Form1.AddLog("  ✓ Tutti i componenti verificati"))
+            Else
+                Form1.SafeInvoke(Sub() Form1.AddLog($"  ⚠ Componenti incompleti: Jar={results(0)}, Assets={results(1)}, Lib={results(2)}"))
+            End If
+            
+            Return allComplete
+
+        Catch ex As Exception
+            Form1.SafeInvoke(Sub() Form1.AddLog($"  ✗ Errore verifica installazione: {ex.Message}"))
+            Return False
+        End Try
+    End Function
+
+    ' Verifica se client.jar è valido
+    Private Async Function IsClientJarValidAsync(versionData As JObject, version As String, minecraftDir As String) As Task(Of Boolean)
+        Return Await Task.Run(Function() As Boolean
+                                  Try
+                                      Dim clientPath As String = Path.Combine(minecraftDir, "versions", version, $"{version}.jar")
+                                      If Not File.Exists(clientPath) Then Return False
+
+                                      ' Se abbiamo hash e dimensione dal JSON, verifichiamo
+                                      Dim clientInfo = versionData("downloads")?.Item("client")
+                                      If clientInfo IsNot Nothing Then
+                                          Dim expectedSize As Long = clientInfo("size").ToObject(Of Long)()
+                                          Dim expectedSha1 As String = clientInfo("sha1").ToString()
+
+                                          Dim fileInfo As New FileInfo(clientPath)
+                                          If fileInfo.Length <> expectedSize Then Return False
+
+                                          ' Verifica SHA1
+                                          Using stream As New FileStream(clientPath, FileMode.Open, FileAccess.Read)
+                                              Using sha1 As SHA1 = SHA1.Create()
+                                                  Dim hashBytes = sha1.ComputeHash(stream)
+                                                  Dim actualSha1 = BitConverter.ToString(hashBytes).Replace("-", "").ToLower()
+                                                  Return actualSha1.Equals(expectedSha1, StringComparison.OrdinalIgnoreCase)
+                                              End Using
+                                          End Using
+                                      Else
+                                          ' Se non abbiamo hash, verifichiamo solo che esista e non sia vuoto
+                                          Dim fileInfo As New FileInfo(clientPath)
+                                          Return fileInfo.Length > 1000000 ' Almeno 1MB
+                                      End If
+                                  Catch
+                                      Return False
+                                  End Try
+                              End Function)
+    End Function
+
+    ' Verifica se tutti gli assets sono completi
+    Private Async Function AreAssetsCompleteAsync(versionData As JObject, minecraftDir As String) As Task(Of Boolean)
+        Return Await Task.Run(Function() As Boolean
+                                  Try
+                                      Dim assetIndexInfo = versionData("assetIndex")
+                                      If assetIndexInfo Is Nothing Then 
+                                          Form1.SafeInvoke(Sub() Form1.AddLog("  ⚠ Nessun assetIndex nel version.json - riscarico"))
+                                          Return False  ' Deve scaricare!
+                                      End If
+
+                                      Dim assetIndexId As String = assetIndexInfo("id").ToString()
+                                      Dim assetIndexPath As String = Path.Combine(minecraftDir, "assets", "indexes", $"{assetIndexId}.json")
+
+                                      ' Se non esiste l'index, non sono completi
+                                      If Not File.Exists(assetIndexPath) Then 
+                                          Form1.SafeInvoke(Sub() Form1.AddLog($"  ⚠ Asset index {assetIndexId}.json mancante"))
+                                          Return False
+                                      End If
+
+                                      ' Leggi asset index
+                                      Dim assetIndexJson As String = File.ReadAllText(assetIndexPath)
+                                      Dim assetIndexData As JObject = JsonConvert.DeserializeObject(Of JObject)(assetIndexJson)
+                                      Dim objects As JObject = CType(assetIndexData("objects"), JObject)
+
+                                      If objects Is Nothing OrElse objects.Count = 0 Then 
+                                          Form1.SafeInvoke(Sub() Form1.AddLog("  ⚠ Asset index vuoto o corrotto - riscarico tutto"))
+                                          Return False  ' Index corrotto, deve riscaricare!
+                                      End If
+
+                                      ' CORRETTO: Verifica TUTTI gli assets, non solo un campione
+                                      ' Questo assicura che suoni vanilla e lingue siano tutti presenti
+                                      Dim totalAssets = objects.Count
+                                      Form1.SafeInvoke(Sub() Form1.AddLog($"  Verifica {totalAssets} assets..."))
+
+                                      ' Verifica tutti gli assets in parallelo per velocità
+                                      Dim missingCount As Integer = 0
+                                      Dim checkedCount As Integer = 0
+
+                                      For Each assetProperty In objects.Properties()
+                                          Dim hash As String = assetProperty.Value("hash").ToString()
+                                          Dim subDir As String = Path.Combine(hash.Substring(0, 2), hash)
+                                          Dim assetPath As String = Path.Combine(minecraftDir, "assets", "objects", subDir)
+
+                                          If Not File.Exists(assetPath) Then
+                                              missingCount += 1
+                                          End If
+
+                                          checkedCount += 1
+                                          ' Log progresso ogni 1000 file
+                                          If checkedCount Mod 1000 = 0 Then
+                                              Form1.SafeInvoke(Sub() Form1.AddLog($"  Verificati {checkedCount}/{totalAssets} assets ({missingCount} mancanti)"))
+                                          End If
+                                      Next
+
+                                      If missingCount > 0 Then
+                                          Form1.SafeInvoke(Sub() Form1.AddLog($"  ⚠ Trovati {missingCount} assets mancanti da scaricare!"))
+                                          Return False
+                                      Else
+                                          Form1.SafeInvoke(Sub() Form1.AddLog($"  ✓ Tutti i {totalAssets} assets sono presenti"))
+                                      End If
+
+                                      Return True
+                                  Catch ex As Exception
+                                      Form1.SafeInvoke(Sub() Form1.AddLog($"  ✗ Errore verifica assets: {ex.Message}"))
+                                      Return False
+                                  End Try
+                              End Function)
+    End Function
+
+    ' Verifica se tutte le librerie necessarie sono presenti
+    Private Async Function AreLibrariesCompleteAsync(versionData As JObject, minecraftDir As String) As Task(Of Boolean)
+        Return Await Task.Run(Function() As Boolean
+                                  Try
+                                      Dim libraries As JArray = CType(versionData("libraries"), JArray)
+                                      If libraries Is Nothing Then Return True
+
+                                      For Each library As JObject In libraries
+                                          If IsLibraryCompatible(library) Then
+                                              Dim libraryName As String = library("name").ToObject(Of String)()
+                                              Dim libraryPath As String = GetLibraryPath(libraryName, minecraftDir)
+
+                                              If Not File.Exists(libraryPath) Then Return False
+
+                                              ' Verifica che il file non sia corrotto (dimensione minima)
+                                              Dim fileInfo As New FileInfo(libraryPath)
+                                              If fileInfo.Length < 100 Then Return False ' Almeno 100 bytes
+                                          End If
+                                      Next
+
+                                      Return True
+                                  Catch
+                                      Return False
+                                  End Try
+                              End Function)
+    End Function
+
+    ' Ottieni manifest con sistema di cache migliorato
+    Private Async Function GetVersionManifestAsync() As Task(Of JObject)
+        ' Usa cache se disponibile e recente (max 1 ora)
+        If manifestCache IsNot Nothing AndAlso
+           DateTime.Now.Subtract(lastManifestUpdate).TotalHours < 1 Then
+            Return manifestCache
+        End If
+
+        Form1.AddLog("Aggiornamento manifest versioni...")
+        Dim manifestUrl As String = "https://launchermeta.mojang.com/mc/game/version_manifest.json"
+        Dim manifestJson As String = Await httpClient.GetStringAsync(manifestUrl)
+
+        manifestCache = JsonConvert.DeserializeObject(Of JObject)(manifestJson)
+        lastManifestUpdate = DateTime.Now
+
+        Return manifestCache
+    End Function
+
+    ' Ottieni dati versione con cache locale persistente
+    Private Async Function GetVersionDataAsync(versionUrl As String, version As String, minecraftDir As String) As Task(Of JObject)
+        Dim versionJsonPath As String = Path.Combine(minecraftDir, "versions", version, $"{version}.json")
+
+        ' Se esiste già e non è corrotto, usalo
+        If File.Exists(versionJsonPath) Then
+            Try
+                Dim existingJson = File.ReadAllText(versionJsonPath)
+                Dim parsedJson = JsonConvert.DeserializeObject(Of JObject)(existingJson)
+
+                ' Verifica che sia un JSON valido con le proprietà necessarie
+                If parsedJson("downloads") IsNot Nothing OrElse parsedJson("libraries") IsNot Nothing Then
+                    Return parsedJson
+                End If
+            Catch
+                ' Se il file è corrotto, lo eliminiamo e riscaricheremo
+                Try
+                    File.Delete(versionJsonPath)
+                Catch
+                End Try
+            End Try
+        End If
+
+        Form1.AddLog("Scaricamento metadati versione...")
+        Dim versionJson As String = Await httpClient.GetStringAsync(versionUrl)
+
+        ' Salva per cache futura
+        Directory.CreateDirectory(Path.GetDirectoryName(versionJsonPath))
+        File.WriteAllText(versionJsonPath, versionJson)
+
+        Return JsonConvert.DeserializeObject(Of JObject)(versionJson)
+    End Function
+
+    ' Download client.jar con retry e ripresa
+    Private Async Function DownloadClientJarAsync(versionData As JObject, version As String, minecraftDir As String) As Task(Of Boolean)
+        Dim maxRetries As Integer = 3
+        Dim retryCount As Integer = 0
+
+        While retryCount < maxRetries
+            Try
+                Form1.AddLog(If(retryCount = 0, "Download client.jar...", $"Retry download client.jar (tentativo {retryCount + 1}/{maxRetries})..."))
+
+                Dim clientInfo = versionData("downloads")("client")
+                Dim clientUrl As String = clientInfo("url").ToString()
+                Dim expectedSize As Long = clientInfo("size").ToObject(Of Long)()
+                Dim expectedSha1 As String = clientInfo("sha1").ToString()
+
+                Dim clientPath As String = Path.Combine(minecraftDir, "versions", version, $"{version}.jar")
+                Dim tempPath As String = clientPath & ".download"
+
+                Directory.CreateDirectory(Path.GetDirectoryName(clientPath))
+
+                ' Elimina file temporaneo precedente se esiste
+                If File.Exists(tempPath) Then
+                    File.Delete(tempPath)
+                End If
+
+                ' Download con progress tracking
+                Using jarClient As New Net.WebClient()
+                    jarClient.Headers.Add("User-Agent", "GangDrogaCity-Launcher/1.0")
+                    Await Form1.DownloadFileTaskAsync(jarClient, New Uri(clientUrl), tempPath, True)
+                End Using
+
+                ' Verifica integrità prima di rinominare
+                If Await VerifyFileIntegrityAsync(tempPath, expectedSize, expectedSha1) Then
+                    ' Rimuovi file vecchio se esiste
+                    If File.Exists(clientPath) Then
+                        File.Delete(clientPath)
+                    End If
+
+                    ' Rinomina file temporaneo in file finale
+                    File.Move(tempPath, clientPath)
+
+                    Form1.AddLog("✓ Client.jar scaricato e verificato")
+                    Return True
+                Else
+                    Form1.AddLog($"✗ Client.jar corrotto (hash non valido), retry...")
+                    If File.Exists(tempPath) Then
+                        File.Delete(tempPath)
+                    End If
+                    retryCount += 1
+                    Await Task.Delay(1000 * retryCount) ' Backoff progressivo
+                End If
+
+            Catch ex As Exception
+                Form1.AddLog($"✗ Errore download client.jar: {ex.Message}")
+                retryCount += 1
+            End Try
+
+            ' Delay fuori dal Catch per compatibilità VB.NET
+            If retryCount > 0 AndAlso retryCount < maxRetries Then
+                Await Task.Delay(2000 * retryCount) ' Backoff progressivo
+            End If
+        End While
+
+        Form1.AddLog($"✗ Fallito download client.jar dopo {maxRetries} tentativi")
+        Return False
+    End Function
+
+
+    Public Async Function DownloadVersionDependencies(version, gamedir) As Task
+        ' scarica tutto cio che contiene il json di versione ovvero librerie e client jar
+        Dim versionData As JObject = Await GetVersionDataAsync("", version, gamedir)
+        Dim libraries As JArray = CType(versionData("libraries"), JArray)
+
+        Dim downloadCount As Integer = 0
+        Dim skippedCount As Integer = 0
+
+        ' IMPORTANTE: Scarica prima le librerie critiche di Forge se mancanti
+        Await DownloadForgeCriticalLibraries(version, gamedir)
+
+        For Each library In libraries
+            If IsLibraryCompatible(library) Then
+                Dim libraryName As String = library("name").ToObject(Of String)()
+                Dim libraryPath As String = GetLibraryPath(libraryName, gamedir)
+
+                ' Verifica se il file esiste già e ha la dimensione corretta
+                Dim needsDownload As Boolean = True
+
+                If File.Exists(libraryPath) Then
+                    Try
+                        ' Controlla se abbiamo informazioni sulla dimensione attesa
+                        Dim expectedSize As Long? = library("downloads")?("artifact")?("size")?.ToObject(Of Long?)()
+
+                        If expectedSize.HasValue Then
+                            Dim fileInfo As New FileInfo(libraryPath)
+                            If fileInfo.Length = expectedSize.Value AndAlso fileInfo.Length > 0 Then
+                                needsDownload = False
+                                Form1.AddLog($"Libreria {libraryName} già presente (dimensione corretta)")
+                                skippedCount += 1
+                            Else
+                                Form1.AddLog($"Libreria {libraryName} presente ma dimensione errata ({fileInfo.Length} vs {expectedSize.Value})")
+                            End If
+                        Else
+                            ' Se non abbiamo la dimensione attesa, verifica solo che non sia vuoto
+                            Dim fileInfo As New FileInfo(libraryPath)
+                            If fileInfo.Length > 100 Then ' Almeno 100 bytes
+                                needsDownload = False
+                                Form1.AddLog($"Libreria {libraryName} già presente")
+                                skippedCount += 1
+                            End If
+                        End If
+                    Catch ex As Exception
+                        Form1.AddLog($"Errore verifica libreria {libraryName}: {ex.Message}")
+                        ' In caso di errore, scarica comunque
+                    End Try
+                End If
+
+                ' Scarica solo se necessario
+                If needsDownload Then
+                    Try
+                        Await Task.Delay(100) ' Piccola pausa per log
+                        Dim url As String = GetLibraryDownloadUrl(library)
+
+                        If Not String.IsNullOrEmpty(url) Then
+                            Dim client As New Net.WebClient
+                            Directory.CreateDirectory(Path.GetDirectoryName(libraryPath))
+                            Form1.AddLog($"Download libreria {libraryName}...")
+                            Await Form1.DownloadFileTaskAsync(client, New Uri(url), libraryPath, False)
+                            downloadCount += 1
+                        Else
+                            Form1.AddLog($"URL non trovato per libreria {libraryName}")
+                        End If
+                    Catch ex As Exception
+                        Form1.AddLog($"Errore download libreria {libraryName}: {ex.Message}")
+                    End Try
+                End If
+            End If
+        Next
+
+        Form1.AddLog($"Download dipendenze completato: {downloadCount} scaricate, {skippedCount} già presenti")
+    End Function
+
+    ' NUOVA FUNZIONE: Scarica le librerie critiche di Forge (inclusa forge-client.jar con le API!)
+    Private Async Function DownloadForgeCriticalLibraries(version As String, gamedir As String) As Task
+        Try
+            ' Estrai la versione Forge dal nome della versione (es. "1.20.1-forge-47.3.33")
+            Dim forgeParts As String() = version.Split("-"c)
+            If forgeParts.Length < 3 Then
+                Form1.AddLog(" Versione non è Forge, skip librerie critiche")
+                Return
+            End If
+
+            Dim mcVersion As String = forgeParts(0) ' "1.20.1"
+            Dim forgeVersion As String = forgeParts(2) ' "47.3.33"
+            Dim fullForgeVersion As String = $"{mcVersion}-{forgeVersion}"
+
+            Form1.AddLog($" Verifica librerie Forge critiche per {fullForgeVersion}...")
+
+            ' URL base Maven di Forge
+            Dim mavenBase As String = "https://maven.minecraftforge.net/net/minecraftforge/forge"
+
+            ' Librerie Forge critiche da scaricare
+            Dim criticalLibs As New Dictionary(Of String, String) From {
+                {"client", "forge"},
+                {"universal", "forge"}
+            }
+
+            For Each libr In criticalLibs
+                Dim classifier As String = libr.Key
+                Dim libName As String = libr.Value
+                Dim fileName As String = $"{libName}-{fullForgeVersion}-{classifier}.jar"
+                Dim libPath As String = Path.Combine(gamedir, "libraries", "net", "minecraftforge", "forge", fullForgeVersion, fileName)
+                Dim downloadUrl As String = $"{mavenBase}/{fullForgeVersion}/{fileName}"
+
+                If Not File.Exists(libPath) Then
+                    Try
+                        Form1.AddLog($" Scaricamento {fileName}...")
+                        Directory.CreateDirectory(Path.GetDirectoryName(libPath))
+
+                        Using client As New Net.WebClient()
+                            client.Headers.Add("User-Agent", "GangDrogaCity-Launcher/1.0")
+                            Await Form1.DownloadFileTaskAsync(client, New Uri(downloadUrl), libPath, False)
+                        End Using
+
+                        Form1.AddLog($" ✓ {fileName} scaricato!")
+                    Catch ex As Exception
+                        Form1.AddLog($" ✗ Errore scaricamento {fileName}: {ex.Message}")
+                    End Try
+                Else
+                    Dim fileInfo As New FileInfo(libPath)
+                    If fileInfo.Length > 1024 Then ' Almeno 1KB
+                        Form1.AddLog($" ✓ {fileName} già presente")
+                    Else
+                        Form1.AddLog($" ✗ {fileName} corrotto, riscaricamento...")
+                        Try
+                            File.Delete(libPath)
+                            Using client As New Net.WebClient()
+                                client.Headers.Add("User-Agent", "GangDrogaCity-Launcher/1.0")
+                                Await Form1.DownloadFileTaskAsync(client, New Uri(downloadUrl), libPath, False)
+                            End Using
+                            Form1.AddLog($" ✓ {fileName} riscaricato!")
+                        Catch ex As Exception
+                            Form1.AddLog($" ✗ Errore riscaricamento {fileName}: {ex.Message}")
+                        End Try
+                    End If
+                End If
+            Next
+
+        Catch ex As Exception
+            Form1.AddLog($" Errore download librerie Forge critiche: {ex.Message}")
+        End Try
+    End Function
+    ' Download assets ottimizzato con retry e gestione errori migliorata
+    Private Async Function DownloadAssetsAsync(versionData As JObject, minecraftDir As String) As Task(Of Boolean)
+        Try
+            Form1.AddLog("Verifica assets...")
+
+            Dim assetIndexInfo = versionData("assetIndex")
+            Dim assetIndexId As String = assetIndexInfo("id").ToString()
+            Dim assetIndexUrl As String = assetIndexInfo("url").ToString()
+            Dim assetIndexPath As String = Path.Combine(minecraftDir, "assets", "indexes", $"{assetIndexId}.json")
+
+            Directory.CreateDirectory(Path.GetDirectoryName(assetIndexPath))
+
+            ' Scarica asset index con retry
+            If Not File.Exists(assetIndexPath) Then
+                Form1.AddLog("Download asset index...")
+                Dim indexRetryCount As Integer = 0
+                While indexRetryCount < 3
+                    Try
+                        Using response = Await httpClient.GetAsync(assetIndexUrl)
+                            response.EnsureSuccessStatusCode()
+                            Using fileStream = File.Create(assetIndexPath)
+                                Await response.Content.CopyToAsync(fileStream)
+                            End Using
+                        End Using
+                        Exit While
+                    Catch ex As Exception
+                        indexRetryCount += 1
+                        If indexRetryCount >= 3 Then
+                            Form1.AddLog($"✗ Errore download asset index: {ex.Message}")
+                            Return False
+                        End If
+                    End Try
+
+                    ' Delay fuori dal Catch
+                    If indexRetryCount > 0 AndAlso indexRetryCount < 3 Then
+                        Await Task.Delay(1000 * indexRetryCount)
+                    End If
+                End While
+            End If
+
+            ' Leggi asset index
+            Dim assetIndexJson As String = Await File.ReadAllTextAsync(assetIndexPath)
+            Dim assetIndexData As JObject = JsonConvert.DeserializeObject(Of JObject)(assetIndexJson)
+            Dim objects As JObject = CType(assetIndexData("objects"), JObject)
+
+            If objects Is Nothing OrElse objects.Count = 0 Then
+                Form1.AddLog("Nessun asset da scaricare")
+                Return True
+            End If
+
+            ' Pre-filtra assets mancanti
+            Form1.AddLog($"Analisi di {objects.Count} assets...")
+            Dim missingAssets = Await Task.Run(Function()
+                                                   Dim missing As New List(Of KeyValuePair(Of String, JToken))
+                                                   For Each assetProperty In objects.Properties()
+                                                       Dim hash As String = assetProperty.Value("hash").ToString()
+                                                       Dim subDir As String = hash.Substring(0, 2) & Path.DirectorySeparatorChar & hash
+                                                       Dim assetPath As String = Path.Combine(minecraftDir, "assets", "objects", subDir)
+
+                                                       If Not File.Exists(assetPath) Then
+                                                           missing.Add(New KeyValuePair(Of String, JToken)(assetProperty.Name, assetProperty.Value))
+                                                       End If
+                                                   Next
+                                                   Return missing
+                                               End Function)
+
+            If missingAssets.Count = 0 Then
+                Form1.AddLog("✓ Tutti gli assets sono già presenti")
+                Return True
+            End If
+
+            Form1.AddLog($"📦 Download {missingAssets.Count} assets mancanti in corso... (potrebbe richiedere qualche minuto)")
+
+            ' Inizializza variabili per tracking UI
+            Form1.downloadType = "assets"
+            Form1.downloadProgress = 0
+            Form1.downloadTotal = missingAssets.Count
+            Form1.downloadStartTime = DateTime.Now
+
+            ' Download parallelo con semaforo
+            Dim maxConcurrency As Integer = 6 ' Bilanciamento tra velocità e stabilità
+            Dim semaphore As New SemaphoreSlim(maxConcurrency)
+            Dim successCount As Integer = 0
+            Dim failedCount As Integer = 0
+            Dim retryCount As Integer = 0
+            Dim progressCounter As Integer = 0
+
+            Dim downloadTasks As New List(Of Task)
+
+            For Each missingAsset In missingAssets
+                downloadTasks.Add(Task.Run(Async Function()
+                                               Await semaphore.WaitAsync()
+                                               Try
+                                                   Dim assetName As String = missingAsset.Key
+                                                   Dim assetHash As String = missingAsset.Value("hash").ToString()
+                                                   Dim subDir As String = assetHash.Substring(0, 2) & "/" & assetHash
+                                                   Dim assetPath As String = Path.Combine(minecraftDir, "assets", "objects", assetHash.Substring(0, 2), assetHash)
+                                                   Dim assetUrl As String = $"https://resources.download.minecraft.net/{subDir}"
+
+                                                   Directory.CreateDirectory(Path.GetDirectoryName(assetPath))
+
+                                                   ' Retry logic per singolo asset
+                                                   Dim downloaded As Boolean = False
+                                                   For retry As Integer = 0 To 2
+                                                       Dim shouldDelay As Boolean = False
+                                                       Try
+                                                           Using client As New Net.WebClient()
+                                                               client.Headers.Add("User-Agent", "GangDrogaCity-Launcher/1.0")
+                                                               Await client.DownloadFileTaskAsync(New Uri(assetUrl), assetPath)
+                                                           End Using
+                                                           downloaded = True
+                                                           Exit For
+                                                       Catch ex As Exception
+                                                           If retry < 2 Then
+                                                               shouldDelay = True
+                                                               Interlocked.Increment(retryCount)
+                                                           End If
+                                                       End Try
+
+                                                       ' Delay fuori dal Catch
+                                                       If shouldDelay Then
+                                                           Await Task.Delay(500 * (retry + 1))
+                                                       End If
+                                                   Next
+
+                                                   ' Aggiorna progresso per UI
+                                                   Dim currentProgress = Interlocked.Increment(progressCounter)
+                                                   Form1.downloadProgress = currentProgress
+
+                                                   If downloaded Then
+                                                       Interlocked.Increment(successCount)
+                                                   Else
+                                                       Interlocked.Increment(failedCount)
+                                                       ' Log solo fallimenti (sempre, sono importanti)
+                                                       Form1.AddLog($"✗ Fallito asset: {assetName}")
+                                                   End If
+
+                                               Finally
+                                                   semaphore.Release()
+                                               End Try
+                                           End Function))
+            Next
+
+            'quando uno qualunque dei task finisce, scrivi il file scaricato
+
+
+
+
+            Await Task.WhenAll(downloadTasks)
+
+
+
+
+
+            ' Fine download
+            Form1.downloadType = ""
+            Form1.AddLog($"✓ Download assets completato: {successCount} successi, {failedCount} fallimenti")
+
+            Form1.AddLog($"✓ Assets completati: {successCount}/{missingAssets.Count} ({failedCount} errori)")
+            Return failedCount = 0 ' Successo solo se nessun errore
+
+        Catch ex As Exception
+            Form1.AddLog($"✗ Errore critico download assets: {ex.Message}")
+            Return False
+        End Try
+    End Function
+
+    ' Download librerie con retry e gestione errori robusta
+    Private Async Function DownloadLibrariesAsync(versionData As JObject, minecraftDir As String) As Task(Of Boolean)
+        Try
+            Form1.AddLog("Analisi librerie...")
+
+            Dim libraries As JArray = CType(versionData("libraries"), JArray)
+            If libraries Is Nothing OrElse libraries.Count = 0 Then
+                Form1.AddLog("Nessuna libreria da scaricare")
+                Return True
+            End If
+
+            ' Pre-filtra librerie mancanti
+            Dim missingLibraries = Await Task.Run(Function()
+                                                      Dim missing As New List(Of JObject)
+                                                      For Each library As JObject In libraries.Cast(Of JObject)()
+                                                          If IsLibraryCompatible(library) Then
+                                                              Dim libraryName As String = library("name").ToObject(Of String)()
+                                                              Dim libraryPath As String = GetLibraryPath(libraryName, minecraftDir)
+
+                                                              Dim needsDownload As Boolean = True
+
+                                                              Try
+                                                                  If File.Exists(libraryPath) Then
+                                                                      Dim expectedSize As Long? = library("downloads")?("artifact")?("size")?.ToObject(Of Long?)()
+                                                                      If expectedSize.HasValue Then
+                                                                          Dim fileInfo As New FileInfo(libraryPath)
+                                                                          If fileInfo.Length = expectedSize.Value AndAlso fileInfo.Length > 0 Then
+                                                                              needsDownload = False
+                                                                          End If
+                                                                      Else
+                                                                          Dim fileInfo As New FileInfo(libraryPath)
+                                                                          If fileInfo.Length > 100 Then
+                                                                              needsDownload = False
+                                                                          End If
+                                                                      End If
+                                                                  End If
+                                                              Catch
+                                                                  ' In caso di errore, scarica
+                                                              End Try
+
+                                                              If needsDownload Then
+                                                                  missing.Add(library)
+                                                              End If
+                                                          End If
+                                                      Next
+                                                      Return missing
+                                                  End Function)
+
+            If missingLibraries.Count = 0 Then
+                Form1.AddLog("✓ Tutte le librerie sono già presenti")
+                Return True
+            End If
+
+            Form1.AddLog($"📚 Download {missingLibraries.Count} librerie mancanti... (potrebbe richiedere qualche minuto)")
+
+            ' Inizializza variabili per tracking UI
+            Form1.downloadType = "libraries"
+            Form1.downloadProgress = 0
+            Form1.downloadTotal = missingLibraries.Count
+            Form1.downloadStartTime = DateTime.Now
+
+            ' Download parallelo con semaforo
+            Dim maxConcurrency As Integer = 8
+            Dim semaphore As New SemaphoreSlim(maxConcurrency)
+            Dim successCount As Integer = 0
+            Dim failedCount As Integer = 0
+            Dim retryCount As Integer = 0
+            Dim progressCounter As Integer = 0
+
+            Dim downloadTasks As New List(Of Task)
+
+            For Each missingLibrary As JObject In missingLibraries
+                downloadTasks.Add(Task.Run(Async Function()
+                                               Await semaphore.WaitAsync()
+                                               Try
+                                                   Dim libraryName As String = missingLibrary("name").ToObject(Of String)()
+                                                   Dim libraryPath As String = GetLibraryPath(libraryName, minecraftDir)
+                                                   Dim libraryUrl As String = GetLibraryDownloadUrl(missingLibrary)
+
+                                                   If String.IsNullOrEmpty(libraryUrl) Then
+                                                       Form1.AddLog($"  ⚠ URL mancante per {libraryName}")
+                                                       Interlocked.Increment(failedCount)
+                                                       Return Nothing ' Async Function deve restituire Task, quindi Return Nothing
+                                                   End If
+
+                                                   Directory.CreateDirectory(Path.GetDirectoryName(libraryPath))
+
+                                                   ' Estrai nome file per log più leggibile
+                                                   Dim fileName As String = Path.GetFileName(libraryPath)
+
+                                                   ' Retry logic per singola libreria
+                                                   Dim downloaded As Boolean = False
+                                                   For retry As Integer = 0 To 2
+                                                       Dim shouldDelay As Boolean = False
+                                                       Dim errorMsg As String = ""
+
+                                                       Try
+                                                           ' Download silenzioso, solo retry se necessario
+                                                           If retry > 0 Then
+                                                               Interlocked.Increment(retryCount)
+                                                           End If
+
+                                                           Using client As New Net.WebClient()
+                                                               client.Headers.Add("User-Agent", "GangDrogaCity-Launcher/1.0")
+                                                               Await client.DownloadFileTaskAsync(New Uri(libraryUrl), libraryPath)
+                                                           End Using
+                                                           downloaded = True
+                                                           Exit For
+                                                       Catch ex As Exception
+                                                           If retry = 2 Then
+                                                               errorMsg = ex.Message
+                                                               Form1.AddLog($"✗ Errore: {fileName} - {errorMsg}")
+                                                           Else
+                                                               shouldDelay = True
+                                                           End If
+                                                       End Try
+
+                                                       ' Delay fuori dal Catch
+                                                       If shouldDelay Then
+                                                           Await Task.Delay(1000 * (retry + 1))
+                                                       End If
+                                                   Next
+
+                                                   ' Aggiorna progresso per UI
+                                                   Dim currentProgress = Interlocked.Increment(progressCounter)
+                                                   Form1.downloadProgress = currentProgress
+
+                                                   If downloaded Then
+                                                       Interlocked.Increment(successCount)
+                                                   Else
+                                                       Interlocked.Increment(failedCount)
+                                                   End If
+
+                                               Finally
+                                                   semaphore.Release()
+                                               End Try
+                                           End Function))
+            Next
+
+            Await Task.WhenAll(downloadTasks)
+
+
+            ' Fine download
+            Form1.downloadType = ""
+            Form1.AddLog($"✓ Librerie completate: {successCount}/{missingLibraries.Count} {failedCount} errori (gli asset potrebbero essere ancora in download)")
+
+            ' Considera successo anche se solo poche librerie falliscono (potrebbero essere opzionali)
+            Return failedCount <= missingLibraries.Count * 0.05 ' Max 5% errori tollerato
+
+        Catch ex As Exception
+            Form1.AddLog($"✗ Errore critico download librerie: {ex.Message}")
+            Return False
+        End Try
+    End Function
+
+    ' Verifica file ottimizzata - solo esistenza e dimensione per velocità
+    Private Function VerifyFileQuickAsync(filePath As String, expectedSize As Long?) As Task(Of Boolean)
+        Return Task.Run(Function() As Boolean
+                            Try
+                                If Not File.Exists(filePath) Then Return False
+
+                                If expectedSize.HasValue Then
+                                    Dim fileInfo As New FileInfo(filePath)
+                                    Return fileInfo.Length = expectedSize.Value AndAlso fileInfo.Length > 0
+                                Else
+                                    ' Se non abbiamo la dimensione attesa, verifica solo che non sia vuoto
+                                    Dim fileInfo As New FileInfo(filePath)
+                                    Return fileInfo.Length > 100 ' Almeno 100 bytes
+                                End If
+                            Catch
+                                Return False
+                            End Try
+                        End Function)
+    End Function
+
+    ' Verifica integrità file con SHA1
+    Private Async Function VerifyFileIntegrityAsync(filePath As String, expectedSize As Long, expectedSha1 As String) As Task(Of Boolean)
+        Return Await Task.Run(Function() As Boolean
+                                  Try
+                                      If Not File.Exists(filePath) Then Return False
+
+                                      Dim fileInfo As New FileInfo(filePath)
+                                      If fileInfo.Length <> expectedSize Then Return False
+
+                                      Using stream As New FileStream(filePath, FileMode.Open, FileAccess.Read)
+                                          Using sha1 As SHA1 = SHA1.Create()
+                                              Dim hashBytes = sha1.ComputeHash(stream)
+                                              Dim actualSha1 = BitConverter.ToString(hashBytes).Replace("-", "").ToLower()
+                                              Return actualSha1.Equals(expectedSha1, StringComparison.OrdinalIgnoreCase)
+                                          End Using
+                                      End Using
+                                  Catch
+                                      Return False
+                                  End Try
+                              End Function)
+    End Function
+
+    Private Function IsLibraryCompatible(library As JObject) As Boolean
+        If library("rules") Is Nothing Then Return True
+
+        Dim rules As JArray = CType(library("rules"), JArray)
+        Dim allowed As Boolean = False
+
+        For Each rule As JObject In rules
+            Dim action As String = rule("action").ToObject(Of String)()
+
+            If rule("os") Is Nothing Then
+                allowed = (action = "allow")
+            Else
+                Dim osName As String = rule("os")("name").ToObject(Of String)()
+                If osName = GetCurrentOS() Then
+                    allowed = (action = "allow")
+                End If
+            End If
+        Next
+
+        Return allowed
+    End Function
+
+    Private Function GetCurrentOS() As String
+        Select Case Environment.OSVersion.Platform
+            Case PlatformID.Win32NT
+                Return "windows"
+            Case PlatformID.Unix
+                Return "linux"
+            Case PlatformID.MacOSX
+                Return "osx"
+            Case Else
+                Return "unknown"
+        End Select
+    End Function
+
+    Private Function GetLibraryPath(libraryName As String, minecraftDir As String) As String
+        Dim parts() As String = libraryName.Split(":"c)
+        If parts.Length < 3 Then
+            Throw New ArgumentException($"Nome libreria non valido: {libraryName}")
+        End If
+
+        Dim groupId As String = parts(0).Replace("."c, Path.DirectorySeparatorChar)
+        Dim artifactId As String = parts(1)
+        Dim version As String = parts(2)
+
+        Dim classifier As String = ""
+        If parts.Length > 3 Then
+            classifier = "-" & parts(3)
+        End If
+
+        Dim fileName As String = $"{artifactId}-{version}{classifier}.jar"
+        Return Path.Combine(minecraftDir, "libraries", groupId, artifactId, version, fileName)
+    End Function
+
+    Private Function GetLibraryDownloadUrl(library As JObject) As String
+        If library("downloads")?.Item("artifact")?.Item("url") IsNot Nothing Then
+            Return library("downloads")("artifact")("url").ToObject(Of String)()
+        End If
+
+        Dim libraryName As String = library("name").ToObject(Of String)()
+        Dim parts() As String = libraryName.Split(":"c)
+
+        If parts.Length < 3 Then Return ""
+
+        Dim groupId As String = parts(0).Replace("."c, "/")
+        Dim artifactId As String = parts(1)
+        Dim version As String = parts(2)
+
+        Dim classifier As String = ""
+        If parts.Length > 3 Then
+            classifier = "-" & parts(3)
+        End If
+
+        Dim fileName As String = $"{artifactId}-{version}{classifier}.jar"
+        Return $"https://repo1.maven.org/maven2/{groupId}/{artifactId}/{version}/{fileName}"
+    End Function
+
+    Private Function FindVersionInfo(manifest As JObject, targetVersion As String) As JObject
+        Try
+            Dim versions As JArray = CType(manifest("versions"), JArray)
+
+            For Each version As JObject In versions
+                Dim versionId As String = version("id").ToString()
+                If versionId.Equals(targetVersion, StringComparison.OrdinalIgnoreCase) Then
+                    Return version
+                End If
+            Next
+
+            Return Nothing
+        Catch ex As Exception
+            Throw New Exception($"Errore durante la ricerca della versione: {ex.Message}")
+        End Try
+    End Function
+End Class

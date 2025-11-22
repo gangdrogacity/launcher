@@ -107,6 +107,13 @@ Public Class MinecraftLauncher
             gameArgsList.Add("--gameDir")
             gameArgsList.Add(minecraftDir)
 
+            '' FONDAMENTALE: Assets directory e index (per suoni/lingue/texture)
+            Dim assetsDir As String = Path.Combine(minecraftDir, "assets")
+            gameArgsList.Add("--assetsDir")
+            gameArgsList.Add(assetsDir)
+            gameArgsList.Add("--assetIndex")
+            gameArgsList.Add("5")  '' Asset index per Minecraft 1.20.1
+
             '' Parametri di autenticazione (modalità offline)
             gameArgsList.Add("--uuid")
             gameArgsList.Add("00000000-0000-0000-0000-000000000000")
