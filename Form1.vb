@@ -15,7 +15,7 @@ Public Class Form1
     Public gameDir As String = Path.Combine(minecraftDir, "game")
     Dim downloadDir As String = Path.Combine(minecraftDir, "downloads")
 
-    Public devmode As Boolean = True
+    Public devmode As Boolean = False
     Dim repobranch As String = "main"
     Dim data = "https://github.com/jamnaga/wtf-modpack/archive/refs/heads/" & repobranch & ".zip"
     Dim repoBasepath As String = "https://raw.githubusercontent.com/jamnaga/wtf-modpack/refs/heads/" & repobranch & "/"
