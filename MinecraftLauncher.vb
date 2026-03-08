@@ -2,6 +2,11 @@
 Imports Newtonsoft.Json
 Imports Newtonsoft.Json.Linq
 
+''' <summary>
+''' Launcher Minecraft con supporto Fabric Loader.
+''' Costruisce classpath standard con librerie Fabric + vanilla + client.jar.
+''' Nessun module system necessario (a differenza di Forge).
+''' </summary>
 Public Class MinecraftLauncher
     Public Async Function LaunchMinecraft(username As String, version As String, minecraftDir As String, ramMB As Integer) As Task(Of Process)
         Try
@@ -25,15 +30,24 @@ Public Class MinecraftLauncher
             Dim versionJson As String = File.ReadAllText(versionJsonPath)
             Dim versionData As JObject = JObject.Parse(versionJson)
 
-            '' Costruisci argomenti JVM completi per Forge
+            '' Carica dati versione parent (vanilla) se presente inheritsFrom
+            Dim parentData As JObject = Nothing
+            If versionData("inheritsFrom") IsNot Nothing Then
+                Dim parentVersion As String = versionData("inheritsFrom").ToString()
+                Dim parentJsonPath As String = Path.Combine(minecraftDir, "versions", parentVersion, $"{parentVersion}.json")
+                If File.Exists(parentJsonPath) Then
+                    parentData = JObject.Parse(File.ReadAllText(parentJsonPath))
+                End If
+            End If
+
+            '' Costruisci argomenti JVM per Fabric
             Dim jvmArgsList As New List(Of String)
 
             '' Memoria
             jvmArgsList.Add($"-Xmx{ramMB}M")
             jvmArgsList.Add($"-Xms{ramMB}M")
 
-            ' aggiungi -XX:+UseG1GC -Dsun.rmi.dgc.server.gcInterval=2147483646 -XX:+UnlockExperimentalVMOptions -XX:G1NewSizePercent=20 -XX:G1ReservePercent=20 -XX:MaxGCPauseMillis=50 -XX:G1HeapRegionSize=32M 
-
+            '' GC tuning
             jvmArgsList.Add("-XX:+UseG1GC")
             jvmArgsList.Add("-Dsun.rmi.dgc.server.gcInterval=2147483646")
             jvmArgsList.Add("-XX:+UnlockExperimentalVMOptions")
@@ -42,59 +56,21 @@ Public Class MinecraftLauncher
             jvmArgsList.Add("-XX:MaxGCPauseMillis=50")
             jvmArgsList.Add("-XX:G1HeapRegionSize=32M")
 
-            '' Natives path - Per Forge usa {mcVersion}-{forgeVersion}, NON il nome completo
-            '' Per Forge 1.20.1-forge-47.3.33 sarà: C:\...\game\natives\1.20.1-47.3.33\
-            Dim nativesVersionName As String = version
-            Dim forgeParts As String() = version.Split("-"c)
-            If forgeParts.Length >= 3 AndAlso forgeParts(1) = "forge" Then
-                '' Per Forge: rimuovi "forge" dal nome (1.20.1-forge-47.3.33 -> 1.20.1-47.3.33)
-                nativesVersionName = $"{forgeParts(0)}-{forgeParts(2)}"
-            End If
-            Dim nativesPath As String = Path.Combine(minecraftDir, "natives", nativesVersionName)
+            '' Natives path - Per Fabric usa la versione vanilla di MC
+            Dim nativesPath As String = Path.Combine(minecraftDir, "natives", "1.20.1")
+            Directory.CreateDirectory(nativesPath)
             jvmArgsList.Add($"""-Djava.library.path={nativesPath}""")
             Form1.AddLog($"  Natives path: {nativesPath}")
 
-            '' Parametri di sistema Forge
-            jvmArgsList.Add("-Djava.net.preferIPv4Stack=system")
-            '' ignoreList: bootstrap libs (nel module path) e language mods (caricati dai mod)
-            jvmArgsList.Add("-DignoreList=bootstraplauncher,securejarhandler,asm-commons,asm-util,asm-analysis,asm-tree,asm,JarJarFileSystems,javafmllanguage,lowcodelanguage,mclanguage")
-            jvmArgsList.Add($"-DlibraryDirectory={Path.Combine(minecraftDir, "libraries").Replace("\", "/")}")
-
-            '' Costruisci classpath PRIMA (serve per legacyClassPath)
-            Dim classpath As String = BuildClasspath(versionData, minecraftDir, version)
-
-            '' FONDAMENTALE: legacyClassPath = TUTTO il classpath!
-            '' Bootstrap usa questo per caricare modlauncher e tutti i moduli nel runtime layer
-            jvmArgsList.Add($"-DlegacyClassPath={classpath.Replace("\", "/")}")
-            Form1.AddLog($"  legacyClassPath configurato con classpath completo")
-
-            '' Il classpath normale può rimanere vuoto o minimale
+            '' Costruisci classpath completo per Fabric (librerie Fabric + vanilla + client.jar)
+            Dim classpath As String = BuildClasspath(versionData, parentData, minecraftDir, version)
             jvmArgsList.Add("-cp")
-            jvmArgsList.Add(""".""")  '' Classpath dummy
+            jvmArgsList.Add($"""{classpath}""")
 
-            '' Costruisci module path per Forge
-            Dim modulePath As String = BuildModulePath(versionData, minecraftDir, version)
-            If Not String.IsNullOrEmpty(modulePath) Then
-                jvmArgsList.Add($"-p")
-                jvmArgsList.Add(modulePath)
-            End If
-
-            '' Aggiungi moduli Java
-            jvmArgsList.Add("--add-modules")
-            jvmArgsList.Add("ALL-MODULE-PATH")
-            jvmArgsList.Add("--add-opens")
-            jvmArgsList.Add("java.base/java.util.jar=cpw.mods.securejarhandler")
-            jvmArgsList.Add("--add-opens")
-            jvmArgsList.Add("java.base/java.lang.invoke=cpw.mods.securejarhandler")
-            jvmArgsList.Add("--add-exports")
-            jvmArgsList.Add("java.base/sun.security.util=cpw.mods.securejarhandler")
-            jvmArgsList.Add("--add-exports")
-            jvmArgsList.Add("jdk.naming.dns/com.sun.jndi.dns=java.naming")
-
-            '' Main class
+            '' Main class dalla versione Fabric
             Dim mainClass As String = versionData("mainClass")?.ToString()
             If String.IsNullOrEmpty(mainClass) Then
-                mainClass = "cpw.mods.bootstraplauncher.BootstrapLauncher"
+                mainClass = "net.fabricmc.loader.impl.launch.knot.KnotClient"
             End If
             jvmArgsList.Add(mainClass)
 
@@ -103,11 +79,11 @@ Public Class MinecraftLauncher
             gameArgsList.Add("--username")
             gameArgsList.Add(username)
             gameArgsList.Add("--version")
-            gameArgsList.Add("1.20.1")
+            gameArgsList.Add(version)
             gameArgsList.Add("--gameDir")
             gameArgsList.Add(minecraftDir)
 
-            '' FONDAMENTALE: Assets directory e index (per suoni/lingue/texture)
+            '' Assets directory e index (per suoni/lingue/texture)
             Dim assetsDir As String = Path.Combine(minecraftDir, "assets")
             gameArgsList.Add("--assetsDir")
             gameArgsList.Add(assetsDir)
@@ -128,18 +104,6 @@ Public Class MinecraftLauncher
             gameArgsList.Add("--height")
             gameArgsList.Add(Screen.PrimaryScreen.Bounds.Height.ToString())
 
-            '' Argomenti Forge specifici
-            gameArgsList.Add("--launchTarget")
-            gameArgsList.Add("forgeclient")
-            gameArgsList.Add("--fml.forgeVersion")
-            gameArgsList.Add("47.3.33")
-            gameArgsList.Add("--fml.mcVersion")
-            gameArgsList.Add("1.20.1")
-            gameArgsList.Add("--fml.forgeGroup")
-            gameArgsList.Add("net.minecraftforge")
-            gameArgsList.Add("--fml.mcpVersion")
-            gameArgsList.Add("20230612.114412")
-
             '' Combina tutti gli argomenti
             Dim allArgs As New List(Of String)
             allArgs.AddRange(jvmArgsList)
@@ -147,7 +111,7 @@ Public Class MinecraftLauncher
 
             Dim arguments As String = String.Join(" ", allArgs)
 
-            Form1.AddLog("Avvio Minecraft...")
+            Form1.AddLog("Avvio Minecraft con Fabric...")
 
             '' Salva script di avvio per debug
             Dim batContent As String = $"""{javaPath}"" {arguments}{vbCrLf}pause"
@@ -158,7 +122,7 @@ Public Class MinecraftLauncher
                 .Arguments = arguments,
                 .WorkingDirectory = minecraftDir,
                 .UseShellExecute = False,
-                .CreateNoWindow = True
+                .CreateNoWindow = Not Form1.devmode
             }
 
             Return Process.Start(startInfo)
@@ -170,145 +134,58 @@ Public Class MinecraftLauncher
         End Try
     End Function
 
-    '' Costruisce il module path per Forge (librerie che devono essere nel module path)
-    '' BASATO SU: https://github.com/alexivkin/minecraft-launcher/blob/main/get-forge-client.sh
-    '' Forge 39+ (Minecraft 1.19+) usa il Java Module System invece del classpath tradizionale
-    Private Function BuildModulePath(versionData As JObject, minecraftDir As String, version As String) As String
-        Dim moduleList As New List(Of String)
-
-        '' Librerie che vanno nel module path per Forge (SOLO Bootstrap)
-        '' NON includere modlauncher qui! Viene caricato da Bootstrap dal classpath
-        Dim moduleLibraries As String() = {
-            "cpw/mods/bootstraplauncher/1.1.2/bootstraplauncher-1.1.2.jar",
-            "cpw/mods/securejarhandler/2.1.10/securejarhandler-2.1.10.jar",
-            "org/ow2/asm/asm-commons/9.7.1/asm-commons-9.7.1.jar",
-            "org/ow2/asm/asm-util/9.7.1/asm-util-9.7.1.jar",
-            "org/ow2/asm/asm-analysis/9.7.1/asm-analysis-9.7.1.jar",
-            "org/ow2/asm/asm-tree/9.7.1/asm-tree-9.7.1.jar",
-            "org/ow2/asm/asm/9.7.1/asm-9.7.1.jar",
-            "net/minecraftforge/JarJarFileSystems/0.3.19/JarJarFileSystems-0.3.19.jar"
-        }
-
-        For Each libPath In moduleLibraries
-            Dim fullPath As String = Path.Combine(minecraftDir, "libraries", libPath.Replace("/", "\"))
-            If File.Exists(fullPath) Then
-                moduleList.Add(fullPath.Replace("\", "/"))
-            End If
-        Next
-
-        Form1.AddLog($"  Module path costruito con {moduleList.Count} librerie")
-        Return String.Join(";", moduleList)
-    End Function
-
-    Private Function BuildClasspath(versionData As JObject, minecraftDir As String, version As String) As String
+    ''' <summary>
+    ''' Costruisce il classpath per Fabric: librerie Fabric + librerie vanilla + client.jar
+    ''' Fabric non usa il Java Module System, tutto va nel classpath tradizionale.
+    ''' </summary>
+    Private Function BuildClasspath(versionData As JObject, parentData As JObject, minecraftDir As String, version As String) As String
         Dim classpathList As New List(Of String)
-        Dim addedPaths As New HashSet(Of String)() '' Per evitare duplicati
-
-        '' Librerie escluse dal classpath (vanno nel module path o vengono caricate dai mod)
-        '' IMPORTANTE: 
-        '' 1. Bootstrap libraries: caricate dal module path (-p)
-        '' 2. forge-universal: escluso, usiamo solo i JAR separati (fmlloader, fmlearlydisplay, fmlcore)
-        '' 3. forge-client: escluso sempre
-        Dim excludedFromClasspath As New HashSet(Of String) From {
-            "bootstraplauncher", "securejarhandler", "asm-commons", "asm-util",
-            "asm-analysis", "asm-tree", "JarJarFileSystems",
-            "javafmllanguage", "lowcodelanguage", "mclanguage",
-            "forge-1.20.1-47.3.33-universal.jar",
-            "forge-1.20.1-47.3.33-client.jar"
-        }
+        Dim addedPaths As New HashSet(Of String)(StringComparer.OrdinalIgnoreCase)
 
         Try
-            '' Aggiungi librerie dalla versione corrente
-            If versionData("libraries") IsNot Nothing Then
-                For Each library As JObject In versionData("libraries")
-                    If IsLibraryAllowed(library) Then
-                        Dim libName As String = library("name")?.ToString()
-                        If Not String.IsNullOrEmpty(libName) Then
-                            Dim libPath As String = GetLibraryPath(library, minecraftDir)
-                            Dim fileName As String = Path.GetFileName(libPath)
+            '' Aggiungi librerie dalla versione Fabric
+            AddLibrariesToClasspath(versionData, minecraftDir, classpathList, addedPaths)
 
-                            '' Verifica che non sia esclusa
-                            Dim shouldExclude As Boolean = False
-                            For Each excluded In excludedFromClasspath
-                                If fileName.Contains(excluded) OrElse libName.Contains(excluded) Then
-                                    shouldExclude = True
-                                    Exit For
-                                End If
-                            Next
-
-                            If Not shouldExclude AndAlso File.Exists(libPath) AndAlso Not addedPaths.Contains(libPath) Then
-                                classpathList.Add(libPath)
-                                addedPaths.Add(libPath)
-                            End If
-                        End If
-                    End If
-                Next
+            '' Aggiungi librerie dalla versione parent (vanilla)
+            If parentData IsNot Nothing Then
+                AddLibrariesToClasspath(parentData, minecraftDir, classpathList, addedPaths)
             End If
 
-            '' Se ha inheritsFrom, aggiungi librerie dalla versione parent
-            If versionData("inheritsFrom") IsNot Nothing Then
-                Dim parentVersion As String = versionData("inheritsFrom").ToString()
-                Dim parentVersionDir As String = Path.Combine(minecraftDir, "versions", parentVersion)
-                Dim parentJsonPath As String = Path.Combine(parentVersionDir, $"{parentVersion}.json")
-
-                If File.Exists(parentJsonPath) Then
-                    Dim parentVersionJson As String = File.ReadAllText(parentJsonPath)
-                    Dim parentVersionData As JObject = JObject.Parse(parentVersionJson)
-
-                    If parentVersionData("libraries") IsNot Nothing Then
-                        For Each library As JObject In parentVersionData("libraries")
-                            If IsLibraryAllowed(library) Then
-                                Dim libName As String = library("name")?.ToString()
-                                If Not String.IsNullOrEmpty(libName) Then
-                                    Dim libPath As String = GetLibraryPath(library, minecraftDir)
-                                    Dim fileName As String = Path.GetFileName(libPath)
-
-                                    Dim shouldExclude As Boolean = False
-                                    For Each excluded In excludedFromClasspath
-                                        If fileName.Contains(excluded) OrElse libName.Contains(excluded) Then
-                                            shouldExclude = True
-                                            Exit For
-                                        End If
-                                    Next
-
-                                    If Not shouldExclude AndAlso File.Exists(libPath) AndAlso Not addedPaths.Contains(libPath) Then
-                                        classpathList.Add(libPath)
-                                        addedPaths.Add(libPath)
-                                    End If
-                                End If
-                            End If
-                        Next
-                    End If
-                End If
-            End If
-
-            '' Aggiungi TUTTE le librerie Forge al classpath (inclusi client e universal)
-            '' IMPORTANTE: NON usare forge-universal.jar, ma solo i JAR separati (fmlloader, fmlcore, fmlearlydisplay)
-            '' Questi vengono aggiunti automaticamente tramite la libreria Forge nel JSON
-            '' Non serve aggiungere manualmente nulla qui!
-            Dim forgeParts As String() = version.Split("-"c)
-            If forgeParts.Length >= 3 Then
-                Dim mcVersion As String = forgeParts(0)
-                Dim forgeVersion As String = forgeParts(2)
-                Dim fullForgeVersion As String = $"{mcVersion}-{forgeVersion}"
-
-                '' Nessun JAR manuale da aggiungere - tutto viene dal libraries array
+            '' Aggiungi client.jar vanilla
+            Dim parentVersion As String = If(versionData("inheritsFrom")?.ToString(), "1.20.1")
+            Dim clientJar As String = Path.Combine(minecraftDir, "versions", parentVersion, $"{parentVersion}.jar")
+            If File.Exists(clientJar) AndAlso Not addedPaths.Contains(clientJar) Then
+                classpathList.Add(clientJar)
+                addedPaths.Add(clientJar)
             End If
 
         Catch ex As Exception
             Form1.AddLog($"Errore costruzione classpath: {ex.Message}")
         End Try
 
-        '' NON aggiungere il client jar per Forge - viene caricato automaticamente da ModLauncher
-        '' Il client jar contiene le classi Minecraft che sono già in forge-universal.jar
-        '' Dim clientJar As String = Path.Combine(minecraftDir, "versions", version, $"{version}.jar")
-        '' If File.Exists(clientJar) AndAlso Not addedPaths.Contains(clientJar) Then
-        ''     classpathList.Add(clientJar)
-        '' End If
-
-        Form1.AddLog($"  Classpath costruito con {classpathList.Count} librerie")
+        Form1.AddLog($"  Classpath costruito con {classpathList.Count} elementi")
         Return String.Join(";", classpathList)
     End Function
+
+    ''' <summary>
+    ''' Aggiunge le librerie di un version JSON al classpath
+    ''' </summary>
+    Private Sub AddLibrariesToClasspath(versionData As JObject, minecraftDir As String, classpathList As List(Of String), addedPaths As HashSet(Of String))
+        If versionData("libraries") Is Nothing Then Return
+
+        For Each library As JObject In versionData("libraries")
+            If IsLibraryAllowed(library) Then
+                Dim libName As String = library("name")?.ToString()
+                If Not String.IsNullOrEmpty(libName) Then
+                    Dim libPath As String = GetLibraryPath(library, minecraftDir)
+                    If File.Exists(libPath) AndAlso Not addedPaths.Contains(libPath) Then
+                        classpathList.Add(libPath)
+                        addedPaths.Add(libPath)
+                    End If
+                End If
+            End If
+        Next
+    End Sub
 
     Private Function IsLibraryAllowed(library As JObject) As Boolean
         Try
@@ -344,19 +221,19 @@ Public Class MinecraftLauncher
             If parts.Length >= 3 Then
                 Dim group As String = parts(0).Replace(".", "\")
                 Dim artifact As String = parts(1)
-                Dim version As String = parts(2)
+                Dim ver As String = parts(2)
 
                 '' Gestione del classificatore (es. :api, :natives-windows)
                 Dim classifier As String = If(parts.Length >= 4, parts(3), "")
 
                 Dim fileName As String
                 If Not String.IsNullOrEmpty(classifier) Then
-                    fileName = $"{artifact}-{version}-{classifier}.jar"
+                    fileName = $"{artifact}-{ver}-{classifier}.jar"
                 Else
-                    fileName = $"{artifact}-{version}.jar"
+                    fileName = $"{artifact}-{ver}.jar"
                 End If
 
-                Return Path.Combine(minecraftDir, "libraries", group, artifact, version, fileName)
+                Return Path.Combine(minecraftDir, "libraries", group, artifact, ver, fileName)
             End If
 
             Return ""

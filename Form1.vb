@@ -15,15 +15,19 @@ Public Class Form1
     Public gameDir As String = Path.Combine(minecraftDir, "game")
     Dim downloadDir As String = Path.Combine(minecraftDir, "downloads")
 
-    Dim repobranch As String = "styleupdate"
+    Public devmode As Boolean = True
+    Dim repobranch As String = "main"
     Dim data = "https://github.com/jamnaga/wtf-modpack/archive/refs/heads/" & repobranch & ".zip"
     Dim repoBasepath As String = "https://raw.githubusercontent.com/jamnaga/wtf-modpack/refs/heads/" & repobranch & "/"
 
     Dim zipPath As String = Path.Combine(downloadDir, "modpack.zip")
-    Dim forgepath As String = Path.Combine(downloadDir, "forge-installer.jar")
+
+    ' Costanti Fabric
+    Dim fabricLoaderVersion As String = "0.18.4"
+    Dim mcVersion As String = "1.20.1"
+    Dim fabricVersionId As String = "fabric-loader-0.18.4-1.20.1"
 
     Dim javaUrl As String = ""
-    Dim forgeUrl As String = "https://maven.minecraftforge.net/net/minecraftforge/forge/1.20.1-47.3.33/forge-1.20.1-47.3.33-installer.jar"
 
     Dim latestVersion As String
 
@@ -113,6 +117,21 @@ Public Class Form1
 
         AddLog("Connessione a internet rilevata.")
         Await Task.Delay(1000)
+
+        ' Dev mode: selezione branch prima del sync
+        If devmode Then
+            AddLog("[DEV] Recupero branch disponibili...")
+            Dim selectedBranch = Await ShowBranchSelectionAsync()
+            If selectedBranch Is Nothing Then
+                AddLog("[DEV] Nessun branch selezionato, chiusura.")
+                Return
+            End If
+            repobranch = selectedBranch
+            data = "https://github.com/jamnaga/wtf-modpack/archive/refs/heads/" & repobranch & ".zip"
+            repoBasepath = "https://raw.githubusercontent.com/jamnaga/wtf-modpack/refs/heads/" & repobranch & "/"
+            AddLog($"[DEV] Branch selezionato: {repobranch}")
+        End If
+
         ProgressBar1.Value = 20
         Dim versionString As String = updater.getLatestversionString()
         If Await updater.CheckForUpdateAsync() Then
@@ -487,8 +506,7 @@ Public Class Form1
 
                 Dim excludeListFiles As String() = {
                     Path.Combine(gameDir, "version.txt"),
-                    Path.Combine(gameDir, "forgeInstalled"),
-                    Path.Combine(gameDir, "forgeDownloaded")
+                    Path.Combine(gameDir, "fabricInstalled")
                     }
 
                 For Each excludePath In excludeListFolder
@@ -544,121 +562,56 @@ Public Class Form1
         End Try
     End Function
 
-    ' Step2 completamente rivisitato e ottimizzato
+    ' Step2: Installazione Fabric via Meta API
     Private Async Function step2() As Task
-        Dim forgeDownloadedMarker As String = Path.Combine(gameDir, "forgeDownloaded")
-        
-        ' Verifica se Forge è già stato scaricato (controlla marker E file di default)
-        If File.Exists(forgeDownloadedMarker) Then
-            Dim cachedForgePath As String = File.ReadAllText(forgeDownloadedMarker).Trim()
-            If Not String.IsNullOrEmpty(cachedForgePath) AndAlso File.Exists(cachedForgePath) Then
-                AddLog($"✓ Forge già scaricato: {Path.GetFileName(cachedForgePath)}")
-                forgepath = cachedForgePath
-                ProgressBar1.Value = 65
-                Await step3()
-                Return
-            Else
-                ' File marker corrotto o file cancellato, rimuovo marker
-                AddLog("⚠ Marker Forge corrotto, riscarico...")
-                File.Delete(forgeDownloadedMarker)
-            End If
-        ElseIf File.Exists(forgepath) Then
-            ' Il file esiste nella posizione di default, ma non c'è marker
-            Dim fileInfo As New FileInfo(forgepath)
-            If fileInfo.Length > 1000000 Then ' Almeno 1MB
-                AddLog($"✓ Forge trovato in cache: {Path.GetFileName(forgepath)}")
-                File.WriteAllText(forgeDownloadedMarker, forgepath)
-                ProgressBar1.Value = 65
-                Await step3()
-                Return
-            Else
-                ' File corrotto, elimino
-                AddLog("⚠ File Forge corrotto, riscarico...")
-                File.Delete(forgepath)
-            End If
+        Dim fabricInstalledMarker As String = Path.Combine(gameDir, "fabricInstalled")
+        Dim fabricInst As New FabricInstaller()
+
+        ' Migrazione da Forge: se l'utente aveva Forge, pulisci prima
+        If fabricInst.IsForgeInstalled(gameDir) Then
+            AddLog("Migrazione da Forge a Fabric in corso...")
+            fabricInst.CleanupForgeInstallation(gameDir)
+            ' Rimuovi anche i vecchi marker in downloadDir
+            Try
+                Dim oldForgePath As String = Path.Combine(downloadDir, "forge-installer.jar")
+                If File.Exists(oldForgePath) Then File.Delete(oldForgePath)
+            Catch
+            End Try
+            AddLog("Migrazione completata. Installazione Fabric...")
         End If
+
+        ' Verifica se Fabric è già installato
+        If File.Exists(fabricInstalledMarker) AndAlso fabricInst.IsFabricInstalled(fabricLoaderVersion, mcVersion, gameDir) Then
+            AddLog($"✓ Fabric Loader {fabricLoaderVersion} già installato")
+            ProgressBar1.Value = 65
+            Await step3()
+            Return
+        End If
+
         Try
-            AddLog("Download Forge installer...")
+            AddLog("Installazione Fabric Loader...")
             ProgressBar1.Value = 45
             Await Task.Delay(200)
 
+            ' Installa Fabric tramite Meta API (scarica profilo JSON + librerie)
+            Dim success As Boolean = Await fabricInst.InstallFabric(fabricLoaderVersion, mcVersion, gameDir)
 
-
-            AddLog("Download Forge installer in corso...")
-
-            Using forgeClient As New Net.WebClient()
-                forgeClient.Headers.Add("User-Agent", "GangDrogaCity-Launcher/1.0")
-
-                ' Handler per il progresso
-
-
-                Await DownloadFileTaskAsync(forgeClient, New Uri(forgeUrl), forgepath, True)
-            End Using
-
-            ' Cache del file Forge appena scaricato
-            Await CacheForgeFileAsync()
-            ' Cache del file Forge appena scaricato
-
-
-            ProgressBar1.Value = 65
-            AddLog("Download Forge completato!")
-            System.IO.File.WriteAllText(Path.Combine(gameDir, "forgeDownloaded"), forgepath)
-
-
-            Await step3()
+            If success Then
+                ProgressBar1.Value = 65
+                AddLog("Fabric Loader installato!")
+                ' Non serve più scrivere il marker qui, lo scriviamo dopo step3
+                Await step3()
+            Else
+                errorRed("Errore durante l'installazione di Fabric Loader.")
+                MessageBox.Show("Si è verificato un errore durante l'installazione di Fabric. Riprova.", "Errore", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                ProgressBar1.Value = 0
+            End If
 
         Catch ex As Exception
-            errorRed($" Errore durante download Forge: {ex.Message}")
-            MessageBox.Show($"Si è verificato un errore durante il download di Forge: {ex.Message}", "Errore", MessageBoxButtons.OK, MessageBoxIcon.Error)
+            errorRed($" Errore durante installazione Fabric: {ex.Message}")
+            MessageBox.Show($"Si è verificato un errore durante l'installazione di Fabric: {ex.Message}", "Errore", MessageBoxButtons.OK, MessageBoxIcon.Error)
             ProgressBar1.Value = 0
         End Try
-        ' Download ottimizzato di Forge
-
-    End Function
-
-    ' Verifica veloce del file Forge usando cache
-    Private Async Function VerifyForgeFileAsync() As Task(Of Boolean)
-        Return Await Task.Run(Function() As Boolean
-                                  Try
-                                      If Not System.IO.File.Exists(forgepath) Then Return False
-
-                                      ' Verifica dimensione tramite HEAD request
-                                      Dim req = Net.WebRequest.Create(forgeUrl)
-                                      req.Method = "HEAD"
-                                      Using resp = req.GetResponse()
-                                          Dim expectedSize As Long = resp.ContentLength
-                                          Dim fileInfo As New FileInfo(forgepath)
-
-                                          If fileInfo.Length <> expectedSize Then Return False
-
-                                          ' Controlla cache per evitare ricalcolo hash
-                                          Dim cacheKey As String = $"{forgepath}_{expectedSize}"
-                                          If fileHashCache.ContainsKey(cacheKey) Then
-                                              Return True ' Se in cache, assumiamo sia valido
-                                          End If
-
-                                          Return True ' Per Forge, la dimensione è sufficiente
-                                      End Using
-                                  Catch
-                                      Return False
-                                  End Try
-                              End Function)
-    End Function
-
-    ' Cache veloce per il file Forge
-    Private Async Function CacheForgeFileAsync() As Task
-        Await Task.Run(Sub()
-                           Try
-                               If System.IO.File.Exists(forgepath) Then
-                                   Dim fileInfo As New FileInfo(forgepath)
-                                   Dim cacheKey As String = $"{forgepath}_{fileInfo.Length}"
-                                   fileHashCache(cacheKey) = "forge_valid" ' Placeholder per indicare validità
-                                   SaveHashCache()
-                               End If
-                           Catch
-                               ' Ignora errori di cache
-                           End Try
-                       End Sub)
     End Function
 
     Private Async Function step3() As Task
@@ -669,28 +622,23 @@ Public Class Form1
 
         ProgressBar1.Value = 75
 
-        Dim forgeInstalledMarker As String = Path.Combine(gameDir, "forgeInstalled")
-        
-        If Not File.Exists(forgeInstalledMarker) Then
+        Dim fabricInstalledMarker As String = Path.Combine(gameDir, "fabricInstalled")
+
+        If Not File.Exists(fabricInstalledMarker) Then
             Try
-                ' Recupera il path di Forge dal marker di download
-                Dim forgeDownloadedMarker As String = Path.Combine(gameDir, "forgeDownloaded")
-                If File.Exists(forgeDownloadedMarker) Then
-                    forgepath = File.ReadAllText(forgeDownloadedMarker).Trim()
-                End If
-                ' Download Minecraft in background
+                ' Download Minecraft vanilla
                 AddLog("Download Minecraft...")
                 Await Task.Delay(500)
                 Try
-                    Await mcDownloader.DownloadMinecraftVersion("1.20.1", gameDir)
+                    Await mcDownloader.DownloadMinecraftVersion(mcVersion, gameDir)
                 Catch ex As Exception
                     ' Fallback se il metodo non è async
-                    Task.Run(Sub() mcDownloader.DownloadMinecraftVersion("1.20.1", gameDir))
+                    Task.Run(Sub() mcDownloader.DownloadMinecraftVersion(mcVersion, gameDir))
                 End Try
 
                 ProgressBar1.Value = 85
 
-                ' Setup Java e Forge
+                ' Verifica che Java sia disponibile
                 Dim javaPath As String = JavaHelper.FindJavaPath().Result
                 AddLog($" Usando Java: {javaPath}")
 
@@ -698,111 +646,35 @@ Public Class Form1
                     Throw New Exception("Java non valido o non funzionante")
                 End If
 
-                System.IO.File.Copy(forgepath, Path.Combine(gameDir, "forge-installer.jar"), True)
-
-                ' Installazione Forge asincrona
-                AddLog("Installazione Forge...")
-                Await InstallForgeAsync(javaPath)
-                ' Il marker forgeInstalled viene scritto dentro InstallForgeAsync se successo
+                ' Scrivi marker e version.txt
+                System.IO.File.WriteAllText(Path.Combine(gameDir, "version.txt"), latestVersion)
+                System.IO.File.WriteAllText(fabricInstalledMarker, "True")
+                ProgressBar1.Value = 100
+                AddLog("Installazione Fabric completata.")
 
             Catch ex As Exception
                 errorRed($" Errore durante installazione: {ex.Message}")
                 MessageBox.Show($"Si è verificato un errore durante l'installazione: {ex.Message}", "Errore", MessageBoxButtons.OK, MessageBoxIcon.Error)
                 ProgressBar1.Value = 0
             End Try
-
-
         End If
-
 
         step4()
     End Function
 
-    ' Installazione Forge asincrona - CORRETTO per evitare blocco UI
-    Private Async Function InstallForgeAsync(javaPath As String) As Task
-        Dim forgeInstalledMarker As String = Path.Combine(gameDir, "forgeInstalled")
-        
-        If Not File.Exists(forgeInstalledMarker) Then
-            Await Task.Run(Sub()
-
-                               Dim batPath As String = Path.Combine(gameDir, "install_forge.bat")
-                               System.IO.File.WriteAllText(batPath, """" & javaPath & """" & " -jar """ & Path.Combine(gameDir, "forge-installer.jar") & """ --installClient """ & gameDir & """" & vbCrLf & "exit")
-                               Dim startInfo As New ProcessStartInfo() With {
-                .FileName = batPath,
-                .UseShellExecute = True,
-                .CreateNoWindow = True,
-                .RedirectStandardOutput = False,
-                .RedirectStandardError = False
-            }
-
-                               Using forgeProcess As Process = Process.Start(startInfo)
-                                   forgeProcess.WaitForExit()
-
-                                   Invoke(Sub()
-                                              If forgeProcess.ExitCode = 0 Then
-                                                  Console.WriteLine("Forge installato correttamente!")
-                                                  ' Salva version.txt e marker forgeInstalled in gameDir
-                                                  System.IO.File.WriteAllText(Path.Combine(gameDir, "version.txt"), latestVersion)
-                                                  System.IO.File.WriteAllText(Path.Combine(gameDir, "forgeInstalled"), "True")
-                                                  ProgressBar1.Value = 100
-                                                  AddLog("Installazione completata.")
-                                              Else
-                                                  ' CORRETTO: Non chiamare direttamente metodi asincroni da Invoke
-                                                  Task.Run(Async Function()
-                                                               Await HandleForgeInstallationFailure()
-                                                           End Function)
-                                                  Return
-                                              End If
-                                              File.Delete(batPath)
-                                          End Sub
-                                   )
-
-                               End Using
-                           End Sub)
-        End If
-        ProgressBar1.Value = 75
-
-    End Function
-
-
-    Private Async Function step4() As Task
-        AddLog("Finalizzazione...")
-
-        ' Verifica integrità JAR (mod e librerie)
-        Await VerifyAndFixCorruptedJars()
-        
-        ' CRITICO: Verifica e scarica TUTTI i componenti di Minecraft vanilla
-        ' Questo include: client.jar, assets (audio + lingue), librerie vanilla
-        AddLog("Verifica completezza Minecraft vanilla...")
-        Await mcDownloader.DownloadMinecraftVersion("1.20.1", gameDir)
-
-        ' Scarica SOLO le librerie specifiche di Forge (forge-client.jar, forge-universal.jar, ecc.)
-        AddLog("Verifica librerie Forge...")
-        Await mcDownloader.DownloadVersionDependencies("1.20.1-forge-47.3.33", gameDir)
-
-
-        doNotPowerOffPanel.Visible = False
-        Panel1.Visible = False
-        menuPanel.Visible = True
-        playBtn.Text = "PLAY"
-        playBtn.Enabled = True
-
-    End Function
-    ' NUOVO: Metodo separato per gestire il fallimento dell'installazione
-    Private Async Function HandleForgeInstallationFailure() As Task
+    ' Gestione fallimento installazione Fabric
+    Private Async Function HandleFabricInstallationFailure() As Task
         Try
-            ' Esegui su UI thread
             Dim result As DialogResult = DialogResult.No
             If InvokeRequired Then
                 Invoke(Sub()
-                           result = MessageBox.Show("Si è verificato un errore durante l'installazione di Forge. Scegli Si per riprovare usando la safe-mode, questo reinstallera' Minecraft e ritenta l'installazione di Forge.", "Errore", MessageBoxButtons.YesNo, MessageBoxIcon.Error)
+                           result = MessageBox.Show("Si è verificato un errore durante l'installazione di Fabric. Scegli Si per riprovare usando la safe-mode, questo reinstallerà Minecraft e ritenterà l'installazione.", "Errore", MessageBoxButtons.YesNo, MessageBoxIcon.Error)
                        End Sub)
             Else
-                result = MessageBox.Show("Si è verificato un errore durante l'installazione di Forge. Scegli Si per riprovare usando la safe-mode, questo reinstallera' Minecraft e ritenta l'installazione di Forge.", "Errore", MessageBoxButtons.YesNo, MessageBoxIcon.Error)
+                result = MessageBox.Show("Si è verificato un errore durante l'installazione di Fabric. Scegli Si per riprovare usando la safe-mode, questo reinstallerà Minecraft e ritenterà l'installazione.", "Errore", MessageBoxButtons.YesNo, MessageBoxIcon.Error)
             End If
 
             If result = DialogResult.Yes Then
-                ' Aggiorna UI
                 SafeInvoke(Sub()
                                AddLog("Avvio modalità safe-mode...")
                                ProgressBar1.Value = 60
@@ -811,30 +683,56 @@ Public Class Form1
                 ' Pulisci file non validi
                 Await RemoveAllNonManifestFiles()
 
-                ' Aggiorna UI
                 SafeInvoke(Sub()
                                AddLog("Reinstallazione Minecraft...")
                                ProgressBar1.Value = 65
                            End Sub)
 
-                ' Riavvia step3 in modo asincrono
-                Await step3()
+                ' Rimuovi marker Fabric per forzare reinstallazione
+                Try
+                    Dim fabricMarker As String = Path.Combine(gameDir, "fabricInstalled")
+                    If File.Exists(fabricMarker) Then File.Delete(fabricMarker)
+                Catch
+                End Try
+
+                ' Riavvia da step2
+                Await step2()
 
             Else
-                ' Aggiorna UI
                 SafeInvoke(Sub()
-                               AddLog("Installazione Forge fallita.")
+                               AddLog("Installazione Fabric fallita.")
                                ProgressBar1.Value = 0
                            End Sub)
             End If
 
         Catch ex As Exception
-            ' Aggiorna UI in caso di errore
             SafeInvoke(Sub()
                            MessageBox.Show($"Si è verificato un errore durante la reinstallazione: {ex.Message}", "Errore", MessageBoxButtons.OK, MessageBoxIcon.Error)
                            ProgressBar1.Value = 0
                        End Sub)
         End Try
+    End Function
+
+    Private Async Function step4() As Task
+        AddLog("Finalizzazione...")
+
+        ' Verifica integrità JAR (mod e librerie)
+        Await VerifyAndFixCorruptedJars()
+
+        ' CRITICO: Verifica e scarica TUTTI i componenti di Minecraft vanilla
+        ' Questo include: client.jar, assets (audio + lingue), librerie vanilla
+        AddLog("Verifica completezza Minecraft vanilla...")
+        Await mcDownloader.DownloadMinecraftVersion(mcVersion, gameDir)
+
+        ' Scarica le librerie specifiche di Fabric (fabric-loader, intermediary, ecc.)
+        AddLog("Verifica librerie Fabric...")
+        Await mcDownloader.DownloadVersionDependencies(fabricVersionId, gameDir)
+
+        doNotPowerOffPanel.Visible = False
+        Panel1.Visible = False
+        menuPanel.Visible = True
+        playBtn.Text = "PLAY"
+        playBtn.Enabled = True
     End Function
 
     ' Verifica file con cache intelligente
@@ -1049,6 +947,110 @@ Public Class Form1
                        statusText.Text = text
                    End Sub)
     End Sub
+
+    ''' <summary>
+    ''' Recupera i branch dal repo GitHub e mostra un dialog di selezione.
+    ''' Restituisce il nome del branch selezionato, oppure Nothing se annullato.
+    ''' </summary>
+    Private Async Function ShowBranchSelectionAsync() As Task(Of String)
+        Try
+            Dim github As New GitHubClient(New ProductHeaderValue("GangDrogaCity-Launcher"))
+            Dim branches = Await github.Repository.Branch.GetAll("jamnaga", "wtf-modpack")
+
+            If branches Is Nothing OrElse branches.Count = 0 Then
+                AddLog("[DEV] Nessun branch trovato.")
+                Return repobranch
+            End If
+
+            Dim branchNames = branches.Select(Function(b) b.Name).OrderBy(Function(n) n).ToList()
+
+            ' Mostra il dialog di selezione sul thread UI
+            Dim result As String = Nothing
+            Dim tcs As New TaskCompletionSource(Of String)()
+
+            Invoke(Sub()
+                       Using dlg As New Form()
+                           dlg.Text = "[DEV] Seleziona Branch"
+                           dlg.Size = New Size(380, 420)
+                           dlg.StartPosition = FormStartPosition.CenterParent
+                           dlg.FormBorderStyle = FormBorderStyle.FixedDialog
+                           dlg.MaximizeBox = False
+                           dlg.MinimizeBox = False
+                           dlg.BackColor = Color.FromArgb(30, 30, 30)
+                           dlg.ForeColor = Color.White
+
+                           Dim lbl As New System.Windows.Forms.Label() With {
+                               .Text = "Seleziona il branch da utilizzare:",
+                               .Location = New Point(12, 12),
+                               .Size = New Size(340, 22),
+                               .Font = New Font("Segoe UI", 10)
+                           }
+                           dlg.Controls.Add(lbl)
+
+                           Dim lst As New ListBox() With {
+                               .Location = New Point(12, 40),
+                               .Size = New Size(340, 290),
+                               .Font = New Font("Consolas", 10),
+                               .BackColor = Color.FromArgb(45, 45, 45),
+                               .ForeColor = Color.LightGreen,
+                               .BorderStyle = BorderStyle.FixedSingle
+                           }
+                           For Each brName As String In branchNames
+                               lst.Items.Add(brName)
+                           Next
+                           ' Preseleziona il branch corrente
+                           Dim idx = branchNames.IndexOf(repobranch)
+                           If idx >= 0 Then lst.SelectedIndex = idx
+                           dlg.Controls.Add(lst)
+
+                           Dim btnOk As New Button() With {
+                               .Text = "Conferma",
+                               .Location = New Point(170, 340),
+                               .Size = New Size(90, 32),
+                               .FlatStyle = FlatStyle.Flat,
+                               .BackColor = Color.FromArgb(0, 120, 215),
+                               .ForeColor = Color.White,
+                               .DialogResult = DialogResult.OK
+                           }
+                           dlg.Controls.Add(btnOk)
+                           dlg.AcceptButton = btnOk
+
+                           Dim btnCancel As New Button() With {
+                               .Text = "Annulla",
+                               .Location = New Point(265, 340),
+                               .Size = New Size(90, 32),
+                               .FlatStyle = FlatStyle.Flat,
+                               .BackColor = Color.FromArgb(80, 80, 80),
+                               .ForeColor = Color.White,
+                               .DialogResult = DialogResult.Cancel
+                           }
+                           dlg.Controls.Add(btnCancel)
+                           dlg.CancelButton = btnCancel
+
+                           ' Doppio click conferma direttamente
+                           AddHandler lst.DoubleClick, Sub(s, ev)
+                                                           If lst.SelectedIndex >= 0 Then
+                                                               dlg.DialogResult = DialogResult.OK
+                                                               dlg.Close()
+                                                           End If
+                                                       End Sub
+
+                           Dim dlgResult = dlg.ShowDialog(Me)
+                           If dlgResult = DialogResult.OK AndAlso lst.SelectedIndex >= 0 Then
+                               tcs.SetResult(lst.SelectedItem.ToString())
+                           Else
+                               tcs.SetResult(Nothing)
+                           End If
+                       End Using
+                   End Sub)
+
+            Return Await tcs.Task
+
+        Catch ex As Exception
+            AddLog($"[DEV] Errore recupero branch: {ex.Message}")
+            Return repobranch
+        End Try
+    End Function
 
     Private Sub Form1_Load(sender As Object, e As EventArgs) Handles MyBase.Load
         statusText.Text = "Avvio..."
@@ -1610,13 +1612,13 @@ Public Class Form1
             ' Verifica e riscarica componenti Minecraft mancanti
             ' IMPORTANTE: Questo verifica e scarica assets vanilla mancanti (suoni, lingue)
             AddLog("Verifica completezza Minecraft vanilla...")
-            Await mcDownloader.DownloadMinecraftVersion("1.20.1", gameDir)
+            Await mcDownloader.DownloadMinecraftVersion(mcVersion, gameDir)
 
-            ' Verifica librerie Forge
-            AddLog("Verifica librerie Forge...")
-            Await mcDownloader.DownloadVersionDependencies("1.20.1-forge-47.3.33", gameDir)
+            ' Verifica librerie Fabric
+            AddLog("Verifica librerie Fabric...")
+            Await mcDownloader.DownloadVersionDependencies(fabricVersionId, gameDir)
 
-            mcTask = Await mcLauncher.LaunchMinecraft(My.Settings.username, "1.20.1-forge-47.3.33", gameDir, 4096)
+            mcTask = Await mcLauncher.LaunchMinecraft(My.Settings.username, fabricVersionId, gameDir, 4096)
 
             If mcTask IsNot Nothing Then
                 Await Task.Delay(2500)
@@ -1624,6 +1626,7 @@ Public Class Form1
                 playBtn.Enabled = True
                 playBtn.BackColor = Color.Red
                 playBtn.ForeColor = Color.White
+                doNotPowerOffPanel.Visible = True
 
                 ' Avvia monitoraggio del processo
                 StartProcessMonitoring()
@@ -1645,7 +1648,7 @@ Public Class Form1
 
             ' Ferma monitoraggio
             StopProcessMonitoring()
-
+            doNotPowerOffPanel.Visible = False
             ' Reset pulsante
             ResetPlayButton()
         End If
@@ -1778,11 +1781,12 @@ Public Class Form1
                     Await RemoveAllNonManifestFiles()
                     ' Rimuovi tutti i marker di stato
                     File.Delete(Path.Combine(gameDir, "version.txt"))
-                    File.Delete(Path.Combine(gameDir, "forgeInstalled"))
-                    File.Delete(Path.Combine(gameDir, "forgeDownloaded"))
-                    ' Rimuovi anche eventuali marker vecchi in minecraftDir (legacy)
-                    File.Delete(Path.Combine(minecraftDir, "forgeInstalled"))
-                    File.Delete(Path.Combine(minecraftDir, "forgeDownloaded"))
+                    File.Delete(Path.Combine(gameDir, "fabricInstalled"))
+                    ' Rimuovi anche eventuali marker vecchi Forge (legacy/migrazione)
+                    Try : File.Delete(Path.Combine(gameDir, "forgeInstalled")) : Catch : End Try
+                    Try : File.Delete(Path.Combine(gameDir, "forgeDownloaded")) : Catch : End Try
+                    Try : File.Delete(Path.Combine(minecraftDir, "forgeInstalled")) : Catch : End Try
+                    Try : File.Delete(Path.Combine(minecraftDir, "forgeDownloaded")) : Catch : End Try
                     menuPanel.Visible = False
                     operationPanel.Visible = False
                     Panel1.Visible = True

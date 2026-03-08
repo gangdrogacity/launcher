@@ -105,7 +105,7 @@ Public Class MinecraftDownloader
     End Function
 
     ''' <summary>
-    ''' Scarica solo le dipendenze di una versione (es. Forge)
+    ''' Scarica solo le dipendenze di una versione (es. Fabric loader)
     ''' </summary>
     Public Async Function DownloadVersionDependencies(version As String, gamedir As String) As Task
         Try
@@ -115,11 +115,6 @@ Public Class MinecraftDownloader
             If versionData Is Nothing Then
                 LogError("✗ Impossibile ottenere metadati")
                 Return
-            End If
-
-            ' Download librerie critiche Forge prima
-            If version.Contains("-forge-") Then
-                Await DownloadForgeCriticalLibrariesAsync(version, gamedir)
             End If
 
             ' Download tutte le librerie
@@ -603,48 +598,7 @@ Public Class MinecraftDownloader
         End Try
     End Function
 
-    ''' <summary>
-    ''' Download librerie Forge critiche
-    ''' </summary>
-    Private Async Function DownloadForgeCriticalLibrariesAsync(version As String, gamedir As String) As Task
-        Try
-            Dim parts = version.Split("-"c)
-            If parts.Length < 3 Then Return
 
-            Dim mcVer = parts(0)
-            Dim forgeVer = parts(2)
-            Dim fullVer = $"{mcVer}-{forgeVer}"
-
-            Log($"  🔥 Librerie Forge...")
-
-            Dim baseUrl = "https://maven.minecraftforge.net/net/minecraftforge/forge"
-            Dim libs As New Dictionary(Of String, String) From {
-                {"client", "forge"},
-                {"universal", "forge"}
-            }
-
-            For Each entry In libs
-                Dim classifier = entry.Key
-                Dim name = entry.Value
-                Dim fileName = $"{name}-{fullVer}-{classifier}.jar"
-                Dim libPath = Path.Combine(gamedir, "libraries", "net", "minecraftforge", "forge", fullVer, fileName)
-                Dim url = $"{baseUrl}/{fullVer}/{fileName}"
-
-                If Not File.Exists(libPath) OrElse New FileInfo(libPath).Length < 1024 Then
-                    Try
-                        Directory.CreateDirectory(Path.GetDirectoryName(libPath))
-                        Await DownloadFileWithRetryAsync(url, libPath)
-                        Log($"    ✓ {fileName}")
-                    Catch ex As Exception
-                        LogError($"    ✗ {fileName}: {ex.Message}")
-                    End Try
-                End If
-            Next
-
-        Catch ex As Exception
-            LogError($"  ✗ Errore Forge: {ex.Message}")
-        End Try
-    End Function
 
 #End Region
 
