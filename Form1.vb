@@ -252,10 +252,14 @@ Public Class Form1
 
     End Sub
 
+    Private Function ShouldSkipManifestFile(filePath As String) As Boolean
+        Return Not String.IsNullOrEmpty(filePath) AndAlso filePath.IndexOf("[server]", StringComparison.OrdinalIgnoreCase) >= 0
+    End Function
+
     Private Async Sub step1(step1only As Boolean)
 
         If drive.AvailableFreeSpace < 1L * 1024 * 1024 * 1024 Then
-            errorRed("Non c'è abbastanza spazio libero sul disco per installare il gioco. Sono necessari almeno 2 GB di spazio libero.")
+            errorRed("Non c'è abbastanza spazio libero sul disco per continuare. Sono necessari almeno 2 GB di spazio libero.")
             Return
         End If
         doNotPowerOffPanel.Visible = True
@@ -288,7 +292,12 @@ Public Class Form1
             ' Lettura e parsing del manifest
             Dim json As String = Await System.IO.File.ReadAllTextAsync(manifestPath)
             Dim manifest As Newtonsoft.Json.Linq.JObject = Newtonsoft.Json.Linq.JObject.Parse(json)
-            Dim files = manifest("files").ToArray()
+            Dim allFiles = manifest("files").ToArray()
+            Dim files = allFiles.Where(Function(f) Not ShouldSkipManifestFile(f("path").ToObject(Of String)())).ToArray()
+            Dim skippedServerFiles As Integer = allFiles.Length - files.Length
+            If skippedServerFiles > 0 Then
+                AddLog($"File server-only ignorati: {skippedServerFiles}")
+            End If
             Dim totalSize As Long = files.Sum(Function(f) f("size").ToObject(Of Long)())
 
             ' Carica cache esistente
@@ -418,6 +427,7 @@ Public Class Form1
             ProgressBar1.Value = 45
             AddLog("Download completato!")
             Await RemoveAllNonManifestFiles(True)
+            Await ProcessManifestPackagesAsync(manifest)
 
             ' Procedi al passo successivo
             If Not step1only Then
@@ -468,6 +478,24 @@ Public Class Form1
                     validFiles.Add(filePath & ".once")
                 End If
             Next
+
+            ' Aggiunge i file estratti dai package per evitare che vengano rimossi dalla pulizia
+            If manifest("packages") IsNot Nothing Then
+                For Each pkg In manifest("packages")
+                    Dim extractTo As String = ""
+                    If pkg("extractTo") IsNot Nothing Then
+                        extractTo = pkg("extractTo").ToObject(Of String)()
+                    End If
+
+                    If pkg("filesToExtract") IsNot Nothing Then
+                        For Each extractEntry In pkg("filesToExtract")
+                            Dim relPath As String = extractEntry.ToObject(Of String)()
+                            Dim extractedPath As String = Path.GetFullPath(Path.Combine(target, extractTo, relPath))
+                            validFiles.Add(extractedPath)
+                        Next
+                    End If
+                Next
+            End If
 
             '''escludi tutti i file nel .gitignore
             '''
@@ -536,7 +564,7 @@ Public Class Form1
                 If Not validFiles.Contains(fullPath) Then
                     Try
                         System.IO.File.Delete(file)
-                        SafeInvoke(Sub() AddLog($">{file.Replace(target & "\", "")}"))
+                        SafeInvoke(Sub() AddLog($"Rimosso:{file.Replace(target & "\", "")}"))
                         'Await Task.Delay(10)
                     Catch ex As Exception
                         SafeInvoke(Sub() AddLog($" Errore rimozione {Path.GetFileName(file)}: {ex.Message}"))
@@ -559,6 +587,302 @@ Public Class Form1
 
         Catch ex As Exception
             SafeInvoke(Sub() AddLog($" Errore durante pulizia file: {ex.Message}"))
+        End Try
+    End Function
+
+    Private Async Function ProcessManifestPackagesAsync(manifest As Newtonsoft.Json.Linq.JObject) As Task
+        If manifest Is Nothing OrElse manifest("packages") Is Nothing Then
+            Return
+        End If
+
+        Dim packages = manifest("packages").ToArray()
+        If packages.Length = 0 Then
+            Return
+        End If
+
+        AddLog($"Verifica pacchetti opzionali/extra: {packages.Length}")
+
+        Dim packageVersions = Await LoadPackageVersionsAsync()
+        Dim packageVersionsDirty As Boolean = False
+
+        For Each pkg In packages
+            Dim packageName As String = If(pkg("name") IsNot Nothing, pkg("name").ToObject(Of String)(), "Package")
+            Dim packageAction As String = If(pkg("action") IsNot Nothing, pkg("action").ToObject(Of String)(), "")
+            Dim packageVersion As String = If(pkg("version") IsNot Nothing, pkg("version").ToObject(Of String)(), "")
+            Dim isRequired As Boolean = If(pkg("required") IsNot Nothing, pkg("required").ToObject(Of Boolean)(), False)
+            Dim overwrite As Boolean = If(pkg("overwrite") IsNot Nothing, pkg("overwrite").ToObject(Of Boolean)(), False)
+            Dim extractTo As String = If(pkg("extractTo") IsNot Nothing, pkg("extractTo").ToObject(Of String)(), "")
+            Dim packageKey As String = packageName.Trim()
+            If String.IsNullOrWhiteSpace(packageKey) Then
+                packageKey = If(pkg("description") IsNot Nothing, pkg("description").ToObject(Of String)(), "Package")
+            End If
+
+            Dim installedVersion As String = ""
+            If packageVersions.ContainsKey(packageKey) Then
+                installedVersion = packageVersions(packageKey)
+            End If
+            Dim hasVersionChange As Boolean = (Not String.IsNullOrWhiteSpace(packageVersion)) AndAlso Not packageVersion.Equals(installedVersion, StringComparison.OrdinalIgnoreCase)
+            Dim effectiveOverwrite As Boolean = overwrite OrElse hasVersionChange
+
+            If hasVersionChange Then
+                If String.IsNullOrWhiteSpace(installedVersion) Then
+                    AddLog($"Package {packageName}: installazione versione {packageVersion}")
+                Else
+                    AddLog($"Package {packageName}: aggiornamento {installedVersion} -> {packageVersion}")
+                End If
+            End If
+
+            Try
+                If Not packageAction.Equals("extract", StringComparison.OrdinalIgnoreCase) Then
+                    AddLog($"Package non gestito ({packageAction}): {packageName}")
+                    Continue For
+                End If
+
+                Dim filesToExtract As New List(Of String)()
+                If pkg("filesToExtract") IsNot Nothing Then
+                    For Each entry In pkg("filesToExtract")
+                        filesToExtract.Add(entry.ToObject(Of String)())
+                    Next
+                End If
+
+                Dim targetDir As String = Path.Combine(gameDir, extractTo.Replace("/", "\\"))
+                If String.IsNullOrWhiteSpace(targetDir) Then
+                    targetDir = gameDir
+                End If
+
+                Dim progressTemplate As String = If(pkg("progressMessage") IsNot Nothing, pkg("progressMessage").ToObject(Of String)(), "")
+
+                ' Se il package è già presente e non richiede sovrascrittura, salta
+                If Not effectiveOverwrite AndAlso filesToExtract.Count > 0 Then
+                    Dim allExtracted As Boolean = filesToExtract.All(Function(rel) File.Exists(Path.Combine(targetDir, rel.Replace("/", "\\"))))
+                    If allExtracted Then
+                        AddLog($"✓ Package già pronto: {packageName}")
+                        If Not String.IsNullOrWhiteSpace(packageVersion) Then
+                            If Not packageVersions.ContainsKey(packageKey) OrElse Not packageVersions(packageKey).Equals(packageVersion, StringComparison.OrdinalIgnoreCase) Then
+                                packageVersions(packageKey) = packageVersion
+                                packageVersionsDirty = True
+                            End If
+                        End If
+                        Continue For
+                    End If
+                End If
+
+                Dim archiveStartPath As String = Nothing
+
+                Dim packageFiles As Newtonsoft.Json.Linq.JArray = Nothing
+                If pkg("files") IsNot Nothing Then
+                    packageFiles = pkg("files").ToObject(Of Newtonsoft.Json.Linq.JArray)()
+                End If
+
+                ' Gestione parti package + progressMessage con placeholder:
+                ' *currentPart*, *totalParts*, *percentage*
+                If pkg("parts") IsNot Nothing AndAlso packageFiles IsNot Nothing Then
+                    Dim partEntries = pkg("parts").ToArray()
+                    Dim totalParts As Integer = partEntries.Length
+                    Dim currentPart As Integer = 0
+
+                    For Each partEntry In partEntries
+                        currentPart += 1
+                        Dim partName As String = partEntry.ToObject(Of String)()
+                        Dim matchingFile As Newtonsoft.Json.Linq.JToken = packageFiles.FirstOrDefault(Function(pf)
+                                                                                                          Dim relPath As String = If(pf("path") IsNot Nothing, pf("path").ToObject(Of String)(), "")
+                                                                                                          Return Path.GetFileName(relPath).Equals(partName, StringComparison.OrdinalIgnoreCase)
+                                                                                                      End Function)
+
+                        If matchingFile Is Nothing Then
+                            Dim missingPartMessage As String = $"Parte non mappata in files: {partName} ({packageName})"
+                            If isRequired Then
+                                Throw New Exception(missingPartMessage)
+                            End If
+                            AddLog($"! {missingPartMessage}")
+                            Continue For
+                        End If
+
+                        Dim relPartPath As String = matchingFile("path").ToObject(Of String)()
+                        Dim localPartPath As String = Path.Combine(gameDir, relPartPath.Replace("/", "\\"))
+                        Dim expectedSize As Long = If(matchingFile("size") IsNot Nothing, matchingFile("size").ToObject(Of Long)(), 0)
+                        Dim expectedHash As String = If(matchingFile("sha256") IsNot Nothing, matchingFile("sha256").ToObject(Of String)(), "")
+
+                        Dim partReady As Boolean = Await VerifyFileWithCacheAsync(localPartPath, expectedSize, expectedHash)
+                        Dim percentage As Integer = CInt(Math.Round((currentPart * 100.0) / Math.Max(1, totalParts)))
+                        Dim progressText As String = If(String.IsNullOrWhiteSpace(progressTemplate),
+                                                        $"Package {packageName}: parte {currentPart}/{totalParts} ({percentage}%)",
+                                                        progressTemplate.Replace("*currentPart*", currentPart.ToString()).Replace("*totalParts*", totalParts.ToString()).Replace("*percentage*", percentage.ToString()))
+
+                        If Not partReady Then
+                            Dim partUrl As String = repoBasepath & relPartPath
+                            Dim localPartDir As String = Path.GetDirectoryName(localPartPath)
+                            If Not Directory.Exists(localPartDir) Then
+                                Directory.CreateDirectory(localPartDir)
+                            End If
+
+                            AddLog(progressText)
+                            Await DownloadPackagePartWithRetryAsync(partUrl, localPartPath, progressText)
+
+                            UpdateHashCacheEntry(localPartPath, expectedSize, expectedHash)
+                        Else
+                            AddLog(progressText & " (ok)")
+                        End If
+
+                        If archiveStartPath Is Nothing Then
+                            archiveStartPath = localPartPath
+                        End If
+                    Next
+                ElseIf packageFiles IsNot Nothing Then
+                    For Each pkgFile In packageFiles
+                        If pkgFile("path") IsNot Nothing Then
+                            Dim candidate As String = Path.Combine(gameDir, pkgFile("path").ToObject(Of String)().Replace("/", "\\"))
+                            If File.Exists(candidate) Then
+                                archiveStartPath = candidate
+                                Exit For
+                            End If
+                        End If
+                    Next
+                End If
+
+                If String.IsNullOrEmpty(archiveStartPath) Then
+                    Dim msg As String = $"File archive non trovato per package: {packageName}"
+                    If isRequired Then
+                        Throw New Exception(msg)
+                    End If
+                    AddLog($"! {msg}")
+                    Continue For
+                End If
+
+                AddLog($"Estrazione package: {packageName}")
+
+                Dim tempRoot As String = Path.Combine(downloadDir, "packages_tmp")
+                Dim safeName As String = String.Concat(packageName.Select(Function(ch) If(Path.GetInvalidFileNameChars().Contains(ch), "_"c, ch)))
+                Dim tempExtract As String = Path.Combine(tempRoot, safeName)
+
+                If Directory.Exists(tempExtract) Then
+                    Directory.Delete(tempExtract, True)
+                End If
+                Directory.CreateDirectory(tempExtract)
+
+                Await Extract7zAsync(archiveStartPath, tempExtract)
+
+                If Not Directory.Exists(targetDir) Then
+                    Directory.CreateDirectory(targetDir)
+                End If
+
+                If filesToExtract.Count > 0 Then
+                    For Each rel In filesToExtract
+                        Dim relNormalized As String = rel.Replace("/", "\\")
+                        Dim sourcePath As String = Path.Combine(tempExtract, relNormalized)
+                        Dim destinationPath As String = Path.Combine(targetDir, relNormalized)
+
+                        If Not File.Exists(sourcePath) Then
+                            If isRequired Then
+                                Throw New Exception($"File estratto mancante: {rel} ({packageName})")
+                            End If
+                            AddLog($"! File package non trovato: {rel}")
+                            Continue For
+                        End If
+
+                        Dim destinationDir As String = Path.GetDirectoryName(destinationPath)
+                        If Not Directory.Exists(destinationDir) Then
+                            Directory.CreateDirectory(destinationDir)
+                        End If
+
+                        If File.Exists(destinationPath) AndAlso Not effectiveOverwrite Then
+                            Continue For
+                        End If
+
+                        File.Copy(sourcePath, destinationPath, True)
+                    Next
+                Else
+                    ' Se filesToExtract non è specificato, copia tutto il contenuto estratto
+                    For Each extractedFile In Directory.GetFiles(tempExtract, "*", SearchOption.AllDirectories)
+                        Dim relativePath As String = extractedFile.Substring(tempExtract.Length).TrimStart("\"c)
+                        Dim destinationPath As String = Path.Combine(targetDir, relativePath)
+                        Dim destinationDir As String = Path.GetDirectoryName(destinationPath)
+
+                        If Not Directory.Exists(destinationDir) Then
+                            Directory.CreateDirectory(destinationDir)
+                        End If
+
+                        If File.Exists(destinationPath) AndAlso Not effectiveOverwrite Then
+                            Continue For
+                        End If
+
+                        File.Copy(extractedFile, destinationPath, True)
+                    Next
+                End If
+
+                Try
+                    Directory.Delete(tempExtract, True)
+                Catch
+                End Try
+
+                If Not String.IsNullOrWhiteSpace(packageVersion) Then
+                    If Not packageVersions.ContainsKey(packageKey) OrElse Not packageVersions(packageKey).Equals(packageVersion, StringComparison.OrdinalIgnoreCase) Then
+                        packageVersions(packageKey) = packageVersion
+                        packageVersionsDirty = True
+                    End If
+                End If
+
+                AddLog($"✓ Package estratto: {packageName}")
+
+            Catch ex As Exception
+                If isRequired Then
+                    Throw
+                End If
+                AddLog($"Errore package non obbligatorio ({packageName}): {ex.Message}")
+            End Try
+        Next
+
+        If packageVersionsDirty Then
+            Await SavePackageVersionsAsync(packageVersions)
+        End If
+    End Function
+
+    Private Function GetPackageVersionsFilePath() As String
+        Return Path.Combine(downloadDir, "package_versions.json")
+    End Function
+
+    Private Async Function LoadPackageVersionsAsync() As Task(Of Dictionary(Of String, String))
+        Dim result As New Dictionary(Of String, String)(StringComparer.OrdinalIgnoreCase)
+
+        Try
+            Dim filePath = GetPackageVersionsFilePath()
+            If Not File.Exists(filePath) Then
+                Return result
+            End If
+
+            Dim json = Await File.ReadAllTextAsync(filePath)
+            If String.IsNullOrWhiteSpace(json) Then
+                Return result
+            End If
+
+            Dim parsed = Newtonsoft.Json.JsonConvert.DeserializeObject(Of Dictionary(Of String, String))(json)
+            If parsed IsNot Nothing Then
+                For Each kvp In parsed
+                    result(kvp.Key) = kvp.Value
+                Next
+            End If
+        Catch ex As Exception
+            AddLog($"Impossibile leggere versioni package: {ex.Message}")
+        End Try
+
+        Return result
+    End Function
+
+    Private Async Function SavePackageVersionsAsync(versions As Dictionary(Of String, String)) As Task
+        Try
+            If versions Is Nothing Then
+                Return
+            End If
+
+            If Not Directory.Exists(downloadDir) Then
+                Directory.CreateDirectory(downloadDir)
+            End If
+
+            Dim filePath = GetPackageVersionsFilePath()
+            Dim json = Newtonsoft.Json.JsonConvert.SerializeObject(versions, Newtonsoft.Json.Formatting.Indented)
+            Await File.WriteAllTextAsync(filePath, json)
+        Catch ex As Exception
+            AddLog($"Impossibile salvare versioni package: {ex.Message}")
         End Try
     End Function
 
@@ -802,6 +1126,81 @@ Public Class Form1
         fileHashCache(cacheKey) = fileHash
     End Sub
 
+    Private Async Function DownloadPackagePartWithRetryAsync(url As String, destinationPath As String, progressText As String, Optional maxRetries As Integer = 3) As Task
+        Dim lastEx As Exception = Nothing
+
+        For attempt As Integer = 1 To maxRetries
+            Dim shouldDelay As Boolean = False
+            Try
+                Using packageClient As New Net.WebClient()
+                    packageClient.Headers.Add("User-Agent", "GangDrogaCity-Launcher/1.0")
+                    packageClient.CachePolicy = New System.Net.Cache.RequestCachePolicy(System.Net.Cache.RequestCacheLevel.NoCacheNoStore)
+
+                    Await DownloadFileTaskAsync(packageClient, New Uri(url), destinationPath, False)
+                    Return
+                End Using
+            Catch ex As Exception
+                lastEx = ex
+
+                ' Rimuove eventuale file parziale dopo errore di download
+                Try
+                    If File.Exists(destinationPath) Then
+                        File.Delete(destinationPath)
+                    End If
+                Catch
+                End Try
+
+                If attempt < maxRetries Then
+                    AddLog($"{progressText} | retry {attempt + 1}/{maxRetries}")
+                    shouldDelay = True
+                End If
+            End Try
+
+            If shouldDelay Then
+                Await Task.Delay(1000 * attempt)
+            End If
+        Next
+
+        Throw New Exception($"Download parte package fallito dopo {maxRetries} tentativi: {url}", lastEx)
+    End Function
+
+    Private Async Function DownloadSevenZipRuntimeWithRetryAsync(url As String, destinationPath As String, Optional maxRetries As Integer = 3) As Task
+        Dim lastEx As Exception = Nothing
+
+        For attempt As Integer = 1 To maxRetries
+            Dim shouldDelay As Boolean = False
+            Try
+                Using runtimeClient As New Net.WebClient()
+                    runtimeClient.Headers.Add("User-Agent", "GangDrogaCity-Launcher/1.0")
+                    runtimeClient.CachePolicy = New System.Net.Cache.RequestCachePolicy(System.Net.Cache.RequestCacheLevel.NoCacheNoStore)
+
+                    Await DownloadFileTaskAsync(runtimeClient, New Uri(url), destinationPath, False)
+                    Return
+                End Using
+            Catch ex As Exception
+                lastEx = ex
+
+                Try
+                    If File.Exists(destinationPath) Then
+                        File.Delete(destinationPath)
+                    End If
+                Catch
+                End Try
+
+                If attempt < maxRetries Then
+                    AddLog($"Download 7z Runtime fallito, retry {attempt + 1}/{maxRetries}...")
+                    shouldDelay = True
+                End If
+            End Try
+
+            If shouldDelay Then
+                Await Task.Delay(1000 * attempt)
+            End If
+        Next
+
+        Throw New Exception($"Download 7z Runtime fallito dopo {maxRetries} tentativi: {url}", lastEx)
+    End Function
+
     Public Function DownloadFileTaskAsync(client As Net.WebClient, uri As Uri, fileName As String, Optional showProgress As Boolean = True) As Task
         Dim tcs As New TaskCompletionSource(Of Boolean)()
 
@@ -871,14 +1270,14 @@ Public Class Form1
                 Directory.CreateDirectory(extractPath)
             End If
 
-            ' Scarica 7zr.exe se non esiste
+            ' Recupera un runtime 7z valido (con fallback + validazione)
             Dim sevenZipPath As String = Await EnsureSevenZipAsync()
 
             If String.IsNullOrEmpty(sevenZipPath) OrElse Not File.Exists(sevenZipPath) Then
                 Throw New Exception("Impossibile scaricare o trovare 7zr.exe.")
             End If
 
-            ' Comando: 7zr.exe x "archivio.7z" -o"destinazione" -y
+            ' Comando: 7z x "archivio.7z" -o"destinazione" -y
             Await Task.Run(Sub()
                                Dim startInfo As New ProcessStartInfo() With {
                                    .FileName = sevenZipPath,
@@ -910,32 +1309,101 @@ Public Class Form1
     End Function
 
     ''' <summary>
-    ''' Assicura che 7zr.exe sia disponibile, scaricandolo se necessario
+    ''' Assicura che un runtime 7z valido sia disponibile, scaricandolo se necessario
     ''' </summary>
     Private Async Function EnsureSevenZipAsync() As Task(Of String)
         Try
             Dim baseDir As String = AppDomain.CurrentDomain.BaseDirectory
-            Dim sevenZipPath As String = Path.Combine(baseDir, "7zr.exe")
+            Dim local7zr As String = Path.Combine(baseDir, "7zr.exe")
 
-            ' Se esiste già, restituisci il percorso
-            If File.Exists(sevenZipPath) Then
-                Return sevenZipPath
+            ' 1) Prova runtime locali/comuni già installati
+            Dim candidates As New List(Of String) From {
+                local7zr,
+                Path.Combine(baseDir, "7za.exe"),
+                "C:\\Program Files\\7-Zip\\7z.exe",
+                "C:\\Program Files (x86)\\7-Zip\\7z.exe"
+            }
+
+            For Each candidate In candidates
+                If File.Exists(candidate) AndAlso IsSevenZipExecutableValid(candidate) Then
+                    Return candidate
+                End If
+            Next
+
+            ' 2) Se 7zr locale esiste ma è invalido, elimina e riscarica in modo atomico
+            If File.Exists(local7zr) Then
+                Try
+                    File.Delete(local7zr)
+                Catch
+                    ' Se non eliminabile, si prosegue usando un file temporaneo e poi move
+                End Try
             End If
 
-            ' Scarica 7zr.exe da 7-zip.org
             SafeInvoke(Sub() AddLog("Download 7z Runtime..."))
 
-            Using webClient As New Net.WebClient()
-                webClient.Headers.Add("User-Agent", "GangDrogaCity-Launcher/1.0")
-                Await webClient.DownloadFileTaskAsync(New Uri("https://www.7-zip.org/a/7zr.exe"), sevenZipPath)
-            End Using
+            Dim tempDownload As String = local7zr & ".tmp"
+            Await DownloadSevenZipRuntimeWithRetryAsync("https://www.7-zip.org/a/7zr.exe", tempDownload)
+
+            If Not IsSevenZipExecutableValid(tempDownload) Then
+                Throw New Exception("Il file 7z scaricato non è un eseguibile valido.")
+            End If
+
+            If File.Exists(local7zr) Then
+                File.Delete(local7zr)
+            End If
+            File.Move(tempDownload, local7zr)
 
             SafeInvoke(Sub() AddLog("7z Runtime pronto."))
-            Return sevenZipPath
+            Return local7zr
 
         Catch ex As Exception
             Console.WriteLine($"Errore durante il download di 7zr.exe: {ex.Message}")
             Return Nothing
+        End Try
+    End Function
+
+    Private Function IsSevenZipExecutableValid(exePath As String) As Boolean
+        Try
+            If String.IsNullOrWhiteSpace(exePath) OrElse Not File.Exists(exePath) Then
+                Return False
+            End If
+
+            ' Verifica header PE: deve iniziare con "MZ"
+            Using fs As New FileStream(exePath, System.IO.FileMode.Open, FileAccess.Read, FileShare.Read)
+                If fs.Length < 2 Then Return False
+                Dim b1 As Integer = fs.ReadByte()
+                Dim b2 As Integer = fs.ReadByte()
+                If b1 <> AscW("M"c) OrElse b2 <> AscW("Z"c) Then
+                    Return False
+                End If
+            End Using
+
+            ' Verifica esecuzione reale del binario
+            Dim psi As New ProcessStartInfo() With {
+                .FileName = exePath,
+                .Arguments = "i",
+                .UseShellExecute = False,
+                .CreateNoWindow = True,
+                .RedirectStandardOutput = True,
+                .RedirectStandardError = True
+            }
+
+            Using p As Process = Process.Start(psi)
+                If p Is Nothing Then
+                    Return False
+                End If
+                If Not p.WaitForExit(5000) Then
+                    Try
+                        p.Kill()
+                    Catch
+                    End Try
+                    Return False
+                End If
+                Return p.ExitCode = 0
+            End Using
+
+        Catch
+            Return False
         End Try
     End Function
 
@@ -1904,5 +2372,62 @@ Public Class Form1
 
     Private Sub Button5_Click(sender As Object, e As EventArgs) Handles Button5.Click
         Me.WindowState = FormWindowState.Minimized
+    End Sub
+
+    Private Sub Button6_Click(sender As Object, e As EventArgs) Handles Button6.Click
+        Dim result = MessageBox.Show("Sei sicuro di voler reinstallare tutto? Verranno rimossi Minecraft, cache, download e dati pacchetti.", "Conferma", MessageBoxButtons.YesNo, MessageBoxIcon.Warning)
+
+        If result <> DialogResult.Yes Then
+            Return
+        End If
+
+        If mcTask IsNot Nothing Then
+            Try
+                If Not mcTask.HasExited Then
+                    MessageBox.Show("Chiudi prima Minecraft, poi riprova.", "Minecraft in esecuzione", MessageBoxButtons.OK, MessageBoxIcon.Information)
+                    Return
+                End If
+            Catch
+                ' Ignora eventuali errori di stato processo
+            End Try
+        End If
+
+        settingsPanel.Visible = False
+        menuPanel.Visible = False
+        operationText.Text = "Reset completo in corso..."
+        operationPanel.Visible = True
+        doNotPowerOffPanel.Visible = True
+
+        Task.Run(Async Function()
+                     Try
+                         Await Task.Delay(300)
+
+                         ' Pulisce ogni dato gestito dal launcher per forzare una reinstallazione completa
+                         If Directory.Exists(minecraftDir) Then
+                             Directory.Delete(minecraftDir, True)
+                         End If
+
+                         If Not Directory.Exists(minecraftDir) Then
+                             Directory.CreateDirectory(minecraftDir)
+                         End If
+
+                         fileHashCache.Clear()
+
+                         SafeInvoke(Sub()
+                                        operationPanel.Visible = False
+                                        Panel1.Visible = True
+                                        AddLog("Reinstallazione completa avviata.")
+                                        boot()
+                                    End Sub)
+
+                     Catch ex As Exception
+                         SafeInvoke(Sub()
+                                        operationPanel.Visible = False
+                                        doNotPowerOffPanel.Visible = False
+                                        menuPanel.Visible = True
+                                        MessageBox.Show($"Si è verificato un errore durante la reinstallazione completa: {ex.Message}", "Errore", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                                    End Sub)
+                     End Try
+                 End Function)
     End Sub
 End Class

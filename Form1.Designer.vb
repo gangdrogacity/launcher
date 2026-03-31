@@ -49,6 +49,7 @@ Partial Class Form1
         Label4 = New Label()
         versionLabel = New Label()
         Button5 = New Button()
+        Button6 = New Button()
         CType(PictureBox1, ComponentModel.ISupportInitialize).BeginInit()
         Panel1.SuspendLayout()
         CType(PictureBox2, ComponentModel.ISupportInitialize).BeginInit()
@@ -181,24 +182,25 @@ Partial Class Form1
         Button2.FlatStyle = FlatStyle.Flat
         Button2.Font = New Font("Segoe UI", 10F, FontStyle.Bold)
         Button2.ForeColor = Color.White
-        Button2.Location = New Point(317, 106)
+        Button2.Location = New Point(464, 16)
         Button2.Name = "Button2"
-        Button2.Size = New Size(103, 28)
+        Button2.Size = New Size(190, 28)
         Button2.TabIndex = 2
-        Button2.Text = "MC Reset"
+        Button2.Text = "Reinstalla Minecraft"
         Button2.UseVisualStyleBackColor = False
         ' 
         ' settingsPanel
         ' 
         settingsPanel.BackColor = Color.FromArgb(CByte(64), CByte(64), CByte(64))
+        settingsPanel.Controls.Add(Button6)
         settingsPanel.Controls.Add(Button2)
         settingsPanel.Controls.Add(settingsSavebtn)
         settingsPanel.Controls.Add(usernameTxt)
         settingsPanel.Controls.Add(Label2)
         settingsPanel.Controls.Add(Label1)
-        settingsPanel.Location = New Point(434, 125)
+        settingsPanel.Location = New Point(330, 109)
         settingsPanel.Name = "settingsPanel"
-        settingsPanel.Size = New Size(437, 146)
+        settingsPanel.Size = New Size(667, 280)
         settingsPanel.TabIndex = 2
         settingsPanel.Visible = False
         ' 
@@ -208,16 +210,16 @@ Partial Class Form1
         settingsSavebtn.FlatStyle = FlatStyle.Flat
         settingsSavebtn.Font = New Font("Segoe UI", 10F, FontStyle.Bold)
         settingsSavebtn.ForeColor = Color.White
-        settingsSavebtn.Location = New Point(338, 15)
+        settingsSavebtn.Location = New Point(550, 221)
         settingsSavebtn.Name = "settingsSavebtn"
-        settingsSavebtn.Size = New Size(82, 30)
+        settingsSavebtn.Size = New Size(104, 47)
         settingsSavebtn.TabIndex = 3
         settingsSavebtn.Text = "Salva"
         settingsSavebtn.UseVisualStyleBackColor = False
         ' 
         ' usernameTxt
         ' 
-        usernameTxt.Location = New Point(106, 64)
+        usernameTxt.Location = New Point(17, 112)
         usernameTxt.Name = "usernameTxt"
         usernameTxt.Size = New Size(171, 23)
         usernameTxt.TabIndex = 5
@@ -227,7 +229,7 @@ Partial Class Form1
         Label2.AutoSize = True
         Label2.Font = New Font("Segoe UI", 12F)
         Label2.ForeColor = Color.White
-        Label2.Location = New Point(19, 62)
+        Label2.Location = New Point(16, 83)
         Label2.Name = "Label2"
         Label2.Size = New Size(81, 21)
         Label2.TabIndex = 4
@@ -363,6 +365,19 @@ Partial Class Form1
         Button5.Text = "__"
         Button5.UseVisualStyleBackColor = False
         ' 
+        ' Button6
+        ' 
+        Button6.BackColor = Color.Red
+        Button6.FlatStyle = FlatStyle.Flat
+        Button6.Font = New Font("Segoe UI", 10F, FontStyle.Bold)
+        Button6.ForeColor = Color.White
+        Button6.Location = New Point(464, 50)
+        Button6.Name = "Button6"
+        Button6.Size = New Size(190, 28)
+        Button6.TabIndex = 6
+        Button6.Text = "Reinstalla tutto"
+        Button6.UseVisualStyleBackColor = False
+        ' 
         ' Form1
         ' 
         AutoScaleDimensions = New SizeF(7F, 15F)
@@ -428,5 +443,6 @@ Partial Class Form1
     Friend WithEvents versionLabel As Label
     Friend WithEvents PictureBox2 As PictureBox
     Friend WithEvents Button5 As Button
+    Friend WithEvents Button6 As Button
 
 End Class
