@@ -256,7 +256,9 @@ Public Class Form1
         Return Not String.IsNullOrEmpty(filePath) AndAlso filePath.IndexOf("[server]", StringComparison.OrdinalIgnoreCase) >= 0
     End Function
 
-    Private Async Sub step1(step1only As Boolean)
+    Private Async Function step1(step1only As Boolean, Optional forceSync As Boolean = False) As Task
+
+        Dim remoteCommitId As String = ""
 
         If drive.AvailableFreeSpace < 1L * 1024 * 1024 * 1024 Then
             errorRed("Non c'è abbastanza spazio libero sul disco per continuare. Sono necessari almeno 2 GB di spazio libero.")
@@ -277,6 +279,28 @@ Public Class Form1
         Dim manifestPath = Path.Combine(downloadDir, "manifest.json")
 
         Try
+            Try
+                remoteCommitId = Await GetRemoteModpackCommitIdAsync()
+                If Not String.IsNullOrWhiteSpace(remoteCommitId) And forceSync = False Then
+                    Dim localCommitId As String = GetSavedModpackCommitId()
+                    If String.Equals(localCommitId, remoteCommitId, StringComparison.OrdinalIgnoreCase) Then
+                        AddLog("Sync saltato.")
+                        If Not step1only Then
+                            If CheckJavaStatusAsync() Then
+                                Await step2()
+                            Else
+                                errorRed(" Java Runtime non trovato o non valido.")
+                            End If
+                        End If
+                        Return
+                    End If
+                End If
+            Catch ex As Exception
+                AddLog($"Impossibile verificare il commit remoto, continuo con il sync: {ex.Message}")
+                Task.Delay(1000).Wait()
+
+            End Try
+
             ' Download del manifest
             Using client As New Net.WebClient()
                 client.Headers.Add("User-Agent", "GangDrogaCity-Launcher/1.0")
@@ -429,6 +453,10 @@ Public Class Form1
             Await RemoveAllNonManifestFiles(True)
             Await ProcessManifestPackagesAsync(manifest)
 
+            If Not String.IsNullOrWhiteSpace(remoteCommitId) Then
+                SaveModpackCommitId(remoteCommitId)
+            End If
+
             ' Procedi al passo successivo
             If Not step1only Then
                 If CheckJavaStatusAsync() Then
@@ -445,7 +473,7 @@ Public Class Form1
             MessageBox.Show($"Si è verificato un errore: {ex.Message}.", "Errore", MessageBoxButtons.OK, MessageBoxIcon.Error)
             ProgressBar1.Value = 0
         End Try
-    End Sub
+    End Function
 
     Private Async Function RemoveAllNonManifestFiles(Optional excludeMinecraft As Boolean = False) As Task
         AddLog("Pulizia file obsoleti...")
@@ -1708,6 +1736,85 @@ Public Class Form1
                    End Sub)
     End Sub
 
+    Private Async Function GetRemoteModpackCommitIdAsync() As Task(Of String)
+        Dim apiUrl As String = $"https://api.github.com/repos/jamnaga/wtf-modpack/commits/{repobranch}"
+
+        Using wc As New Net.WebClient()
+            wc.Headers.Add("User-Agent", "GangDrogaCity-Launcher/1.0")
+            wc.CachePolicy = New System.Net.Cache.RequestCachePolicy(System.Net.Cache.RequestCacheLevel.NoCacheNoStore)
+
+            Dim json As String = Await wc.DownloadStringTaskAsync(apiUrl)
+            Dim commitObj As Newtonsoft.Json.Linq.JObject = Newtonsoft.Json.Linq.JObject.Parse(json)
+            Return If(commitObj("sha") IsNot Nothing, commitObj("sha").ToObject(Of String)(), "")
+        End Using
+    End Function
+
+    Private Function GetSavedModpackCommitId() As String
+        Try
+            Dim commitFilePath As String = Path.Combine(downloadDir, "latest_modpack_commit.txt")
+            If Not File.Exists(commitFilePath) Then
+                Return ""
+            End If
+
+            Return File.ReadAllText(commitFilePath).Trim()
+        Catch
+            Return ""
+        End Try
+    End Function
+
+    Private Sub SaveModpackCommitId(commitId As String)
+        If String.IsNullOrWhiteSpace(commitId) Then
+            Return
+        End If
+
+        Try
+            If Not Directory.Exists(downloadDir) Then
+                Directory.CreateDirectory(downloadDir)
+            End If
+
+            Dim commitFilePath As String = Path.Combine(downloadDir, "latest_modpack_commit.txt")
+            File.WriteAllText(commitFilePath, commitId.Trim())
+        Catch ex As Exception
+            AddLog($"Impossibile salvare latest commit id locale: {ex.Message}")
+        End Try
+    End Sub
+
+    Private Sub ApplyReducedGraphicsOptions()
+        Dim optionsPath As String = Path.Combine(gameDir, "options.txt")
+        Dim optionsLines As New List(Of String)()
+
+        If File.Exists(optionsPath) Then
+            optionsLines.AddRange(File.ReadAllLines(optionsPath))
+        End If
+
+        UpdateOptionLine(optionsLines, "graphicsMode", "0")
+        UpdateOptionLine(optionsLines, "renderDistance", "5")
+        UpdateOptionLine(optionsLines, "enableVsync", "false")
+        UpdateOptionLine(optionsLines, "entityShadows", "false")
+        UpdateOptionLine(optionsLines, "simulationDistance", "5")
+        UpdateOptionLine(optionsLines, "ao", "false")
+        UpdateOptionLine(optionsLines, "biomeBlendRadius", "0")
+        UpdateOptionLine(optionsLines, "particles", "0")
+        UpdateOptionLine(optionsLines, "mipmapLevels", "1")
+        UpdateOptionLine(optionsLines, "renderClouds", "false")
+        UpdateOptionLine(optionsLines, "maxFps", "60")
+
+        File.WriteAllLines(optionsPath, optionsLines)
+
+    End Sub
+
+    Private Sub UpdateOptionLine(optionsLines As List(Of String), optionName As String, optionValue As String)
+        Dim prefix As String = optionName & ":"
+        Dim existingIndex As Integer = optionsLines.FindIndex(Function(line) line.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        Dim updatedLine As String = prefix & optionValue
+
+        If existingIndex >= 0 Then
+            optionsLines(existingIndex) = updatedLine
+        Else
+            optionsLines.Add(updatedLine)
+        End If
+    End Sub
+
     Private Function isCached(filePath, size)
         Dim cachePath As String = Path.Combine(minecraftDir, "cache.json")
         If Not System.IO.File.Exists(cachePath) Then
@@ -2094,7 +2201,7 @@ Public Class Form1
                 playBtn.Enabled = True
                 playBtn.BackColor = Color.Red
                 playBtn.ForeColor = Color.White
-                doNotPowerOffPanel.Visible = True
+                'doNotPowerOffPanel.Visible = True
 
                 ' Avvia monitoraggio del processo
                 StartProcessMonitoring()
@@ -2202,6 +2309,7 @@ Public Class Form1
         playBtn.Enabled = True
         playBtn.BackColor = Color.Green
         playBtn.ForeColor = Color.White
+        Button7.Enabled = True
     End Sub
 
     Private Sub userLabel_Click(sender As Object, e As EventArgs) Handles userLabel.Click
@@ -2237,7 +2345,10 @@ Public Class Form1
 
     Private Async Sub Button2_Click(sender As Object, e As EventArgs) Handles Button2.Click
         Dim result = MessageBox.Show("Sei sicuro di voler reinstallare minecraft?", "Conferma", MessageBoxButtons.YesNo, MessageBoxIcon.Question)
-
+        If Not mcTask.HasExited Then
+            MessageBox.Show("Chiudi prima Minecraft, poi riprova.", "Minecraft in esecuzione", MessageBoxButtons.OK, MessageBoxIcon.Information)
+            Return
+        End If
         If result = DialogResult.Yes Then
             settingsPanel.Visible = False
             operationText.Text = "Resetto Minecraft..."
@@ -2429,5 +2540,157 @@ Public Class Form1
                                     End Sub)
                      End Try
                  End Function)
+    End Sub
+
+    Private Async Sub Button7_Click(sender As Object, e As EventArgs) Handles Button7.Click
+        Dim result = MessageBox.Show("Vuoi avviare GangDrogaCity in grafica ridotta? Verranno disabilitati shaders, animazioni e dettagli per migliorare le prestazioni. Puoi sempre modificare questa impostazione in seguito dalle opzioni grafiche di Minecraft.", "Modalità grafica ridotta", MessageBoxButtons.YesNo, MessageBoxIcon.Question)
+        If result = DialogResult.Yes Then
+
+            If playBtn.Text = "PLAY" Then
+                playBtn.Text = "ATTENDI"
+                playBtn.Enabled = False
+                playBtn.BackColor = Color.Yellow
+                playBtn.ForeColor = Color.Black
+                crashPanel.Visible = False
+                operationPanel.Visible = True
+                Await Task.Delay(420)
+
+                Await step1(True)
+
+
+                doNotPowerOffPanel.Visible = False
+
+
+
+                If My.Settings.username.Length < 3 Then
+                    playBtn.Text = "PLAY"
+                    playBtn.Enabled = True
+                    playBtn.BackColor = Color.Green
+                    playBtn.ForeColor = Color.White
+                    MessageBox.Show("Imposta un nome utente prima di giocare.", "Nome utente mancante", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                    menuPanel.Visible = False
+                    settingsPanel.Visible = True
+                    Return
+                End If
+
+                ' Verifica e riscarica componenti Minecraft mancanti
+                ' IMPORTANTE: Questo verifica e scarica assets vanilla mancanti (suoni, lingue)
+                AddLog("Verifica Minecraft vanilla...")
+                Await mcDownloader.DownloadMinecraftVersion(mcVersion, gameDir)
+
+                ' Verifica librerie Fabric
+                AddLog("Verifica librerie Fabric...")
+                Await mcDownloader.DownloadVersionDependencies(fabricVersionId, gameDir)
+
+                ' Rimuove le mod client-side per la modalità grafica ridotta
+                Dim modsDir As String = Path.Combine(gameDir, "mods")
+                If Directory.Exists(modsDir) Then
+                    Dim clientModFiles() As String = Directory.GetFiles(modsDir, "*.jar", SearchOption.AllDirectories).
+                        Where(Function(modFile) modFile.IndexOf("[client]", StringComparison.OrdinalIgnoreCase) >= 0 OrElse Path.GetFileName(modFile).IndexOf("[client]", StringComparison.OrdinalIgnoreCase) >= 0).
+                        ToArray()
+
+                    For Each modFile As String In clientModFiles
+                        Try
+                            If modFile.IndexOf("drippyloadingscreen", StringComparison.OrdinalIgnoreCase) >= 0 Then
+                                Continue For
+                            End If
+                            File.Delete(modFile)
+                            AddLog($"Rimuovo: {Path.GetFileName(modFile)}")
+                        Catch ex As Exception
+                            AddLog($"Errore rimuovendo la mod client {Path.GetFileName(modFile)}: {ex.Message}")
+                        End Try
+                    Next
+                End If
+
+                ApplyReducedGraphicsOptions()
+
+
+
+                mcTask = Await mcLauncher.LaunchMinecraft(My.Settings.username, fabricVersionId, gameDir, 4096)
+
+                If mcTask IsNot Nothing Then
+                    Await Task.Delay(2500)
+                    playBtn.Text = "CHIUDI"
+                    playBtn.Enabled = True
+                    playBtn.BackColor = Color.Red
+                    playBtn.ForeColor = Color.White
+                    'doNotPowerOffPanel.Visible = True
+
+                    ' Avvia monitoraggio del processo
+                    StartProcessMonitoring()
+                    Await Task.Delay(420)
+                    operationPanel.Visible = False
+                    Await Task.Delay(420)
+                Else
+                    playBtn.Text = "PLAY"
+                    playBtn.Enabled = True
+                    playBtn.BackColor = Color.Green
+                    playBtn.ForeColor = Color.White
+                    MessageBox.Show("Si è verificato un errore durante l'avvio di Minecraft. Controlla i log per maggiori dettagli.", "Errore avvio", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                End If
+            ElseIf playBtn.Text = "CHIUDI" Then
+                If mcTask IsNot Nothing AndAlso Not mcTask.HasExited Then
+                    mcTask.Kill()
+                    mcTask.WaitForExit(5000) ' Attendi max 5 secondi
+                End If
+
+                ' Ferma monitoraggio
+                StopProcessMonitoring()
+                doNotPowerOffPanel.Visible = False
+                ' Reset pulsante
+                ResetPlayButton()
+            End If
+        Else
+
+        End If
+    End Sub
+
+    Private Sub playBtn_EnabledChanged(sender As Object, e As EventArgs) Handles playBtn.EnabledChanged
+        Button7.Enabled = playBtn.Enabled
+        If playBtn.Text = "CHIUDI" Then
+            Button7.Enabled = False
+        End If
+    End Sub
+
+    Private Sub Button8_Click(sender As Object, e As EventArgs) Handles Button8.Click
+
+
+        If mcTask IsNot Nothing Then
+            Try
+                If Not mcTask.HasExited Then
+                    MessageBox.Show("Chiudi prima Minecraft, poi riprova.", "Minecraft in esecuzione", MessageBoxButtons.OK, MessageBoxIcon.Information)
+                    Return
+                End If
+            Catch
+                ' Ignora eventuali errori di stato processo
+            End Try
+        End If
+
+        settingsPanel.Visible = False
+        menuPanel.Visible = False
+        operationText.Text = "Verifica in corso..."
+        operationPanel.Visible = True
+        doNotPowerOffPanel.Visible = True
+
+        Task.Run(Async Function()
+                     Try
+                         Await Task.Delay(300)
+
+                         SafeInvoke(Async Sub()
+                                        operationPanel.Visible = False
+                                        Panel1.Visible = True
+                                        Await step1(False, True)
+                                    End Sub)
+
+                     Catch ex As Exception
+                         SafeInvoke(Sub()
+                                        operationPanel.Visible = False
+                                        doNotPowerOffPanel.Visible = False
+                                        menuPanel.Visible = True
+                                        MessageBox.Show($"Si è verificato un errore durante la reinstallazione completa: {ex.Message}", "Errore", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                                    End Sub)
+                     End Try
+                 End Function)
+
     End Sub
 End Class

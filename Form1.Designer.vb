@@ -30,11 +30,14 @@ Partial Class Form1
         Panel1 = New Panel()
         PictureBox2 = New PictureBox()
         menuPanel = New Panel()
+        Button7 = New Button()
         Button4 = New Button()
         userLabel = New Label()
         playBtn = New Button()
         Button2 = New Button()
         settingsPanel = New Panel()
+        Button8 = New Button()
+        Button6 = New Button()
         settingsSavebtn = New Button()
         usernameTxt = New TextBox()
         Label2 = New Label()
@@ -49,7 +52,6 @@ Partial Class Form1
         Label4 = New Label()
         versionLabel = New Label()
         Button5 = New Button()
-        Button6 = New Button()
         CType(PictureBox1, ComponentModel.ISupportInitialize).BeginInit()
         Panel1.SuspendLayout()
         CType(PictureBox2, ComponentModel.ISupportInitialize).BeginInit()
@@ -128,6 +130,7 @@ Partial Class Form1
         ' 
         ' menuPanel
         ' 
+        menuPanel.Controls.Add(Button7)
         menuPanel.Controls.Add(Button4)
         menuPanel.Controls.Add(userLabel)
         menuPanel.Controls.Add(playBtn)
@@ -136,6 +139,20 @@ Partial Class Form1
         menuPanel.Size = New Size(1338, 498)
         menuPanel.TabIndex = 6
         menuPanel.Visible = False
+        ' 
+        ' Button7
+        ' 
+        Button7.BackColor = Color.FromArgb(CByte(128), CByte(64), CByte(0))
+        Button7.Enabled = False
+        Button7.FlatStyle = FlatStyle.Flat
+        Button7.Font = New Font("Segoe UI", 10F, FontStyle.Bold)
+        Button7.ForeColor = Color.White
+        Button7.Location = New Point(440, 326)
+        Button7.Name = "Button7"
+        Button7.Size = New Size(420, 30)
+        Button7.TabIndex = 8
+        Button7.Text = "Gioca con la grafica di merda"
+        Button7.UseVisualStyleBackColor = False
         ' 
         ' Button4
         ' 
@@ -182,9 +199,9 @@ Partial Class Form1
         Button2.FlatStyle = FlatStyle.Flat
         Button2.Font = New Font("Segoe UI", 10F, FontStyle.Bold)
         Button2.ForeColor = Color.White
-        Button2.Location = New Point(464, 16)
+        Button2.Location = New Point(500, 118)
         Button2.Name = "Button2"
-        Button2.Size = New Size(190, 28)
+        Button2.Size = New Size(154, 28)
         Button2.TabIndex = 2
         Button2.Text = "Reinstalla Minecraft"
         Button2.UseVisualStyleBackColor = False
@@ -192,17 +209,44 @@ Partial Class Form1
         ' settingsPanel
         ' 
         settingsPanel.BackColor = Color.FromArgb(CByte(64), CByte(64), CByte(64))
+        settingsPanel.Controls.Add(Button8)
         settingsPanel.Controls.Add(Button6)
         settingsPanel.Controls.Add(Button2)
         settingsPanel.Controls.Add(settingsSavebtn)
         settingsPanel.Controls.Add(usernameTxt)
         settingsPanel.Controls.Add(Label2)
         settingsPanel.Controls.Add(Label1)
-        settingsPanel.Location = New Point(330, 109)
+        settingsPanel.Location = New Point(330, 44)
         settingsPanel.Name = "settingsPanel"
         settingsPanel.Size = New Size(667, 280)
         settingsPanel.TabIndex = 2
         settingsPanel.Visible = False
+        ' 
+        ' Button8
+        ' 
+        Button8.BackColor = Color.FromArgb(CByte(0), CByte(192), CByte(0))
+        Button8.FlatStyle = FlatStyle.Flat
+        Button8.Font = New Font("Segoe UI", 10F, FontStyle.Bold)
+        Button8.ForeColor = Color.White
+        Button8.Location = New Point(482, 84)
+        Button8.Name = "Button8"
+        Button8.Size = New Size(172, 28)
+        Button8.TabIndex = 7
+        Button8.Text = "Verifica installazione"
+        Button8.UseVisualStyleBackColor = False
+        ' 
+        ' Button6
+        ' 
+        Button6.BackColor = Color.Red
+        Button6.FlatStyle = FlatStyle.Flat
+        Button6.Font = New Font("Segoe UI", 10F, FontStyle.Bold)
+        Button6.ForeColor = Color.White
+        Button6.Location = New Point(530, 152)
+        Button6.Name = "Button6"
+        Button6.Size = New Size(124, 28)
+        Button6.TabIndex = 6
+        Button6.Text = "Reinstalla tutto"
+        Button6.UseVisualStyleBackColor = False
         ' 
         ' settingsSavebtn
         ' 
@@ -274,7 +318,7 @@ Partial Class Form1
         ' 
         doNotPowerOffPanel.BackColor = Color.Teal
         doNotPowerOffPanel.Controls.Add(Label3)
-        doNotPowerOffPanel.Location = New Point(368, 503)
+        doNotPowerOffPanel.Location = New Point(368, 531)
         doNotPowerOffPanel.Name = "doNotPowerOffPanel"
         doNotPowerOffPanel.Size = New Size(585, 38)
         doNotPowerOffPanel.TabIndex = 7
@@ -298,7 +342,7 @@ Partial Class Form1
         crashPanel.Controls.Add(Button3)
         crashPanel.Controls.Add(Label5)
         crashPanel.Controls.Add(Label4)
-        crashPanel.Location = New Point(368, 374)
+        crashPanel.Location = New Point(368, 397)
         crashPanel.Name = "crashPanel"
         crashPanel.Size = New Size(585, 123)
         crashPanel.TabIndex = 7
@@ -364,19 +408,6 @@ Partial Class Form1
         Button5.TabIndex = 9
         Button5.Text = "__"
         Button5.UseVisualStyleBackColor = False
-        ' 
-        ' Button6
-        ' 
-        Button6.BackColor = Color.Red
-        Button6.FlatStyle = FlatStyle.Flat
-        Button6.Font = New Font("Segoe UI", 10F, FontStyle.Bold)
-        Button6.ForeColor = Color.White
-        Button6.Location = New Point(464, 50)
-        Button6.Name = "Button6"
-        Button6.Size = New Size(190, 28)
-        Button6.TabIndex = 6
-        Button6.Text = "Reinstalla tutto"
-        Button6.UseVisualStyleBackColor = False
         ' 
         ' Form1
         ' 
@@ -444,5 +475,7 @@ Partial Class Form1
     Friend WithEvents PictureBox2 As PictureBox
     Friend WithEvents Button5 As Button
     Friend WithEvents Button6 As Button
+    Friend WithEvents Button7 As Button
+    Friend WithEvents Button8 As Button
 
 End Class
