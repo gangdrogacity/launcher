@@ -6,7 +6,7 @@
       <Value Profile="(Default)" />
     </Setting>
     <Setting Name="version" Type="System.String" Scope="Application">
-      <Value Profile="(Default)">2.2.4</Value>
+      <Value Profile="(Default)">2.2.4.1</Value>
     </Setting>
     <Setting Name="fabricLoaderVersion" Type="System.String" Scope="User">
       <Value Profile="(Default)" />

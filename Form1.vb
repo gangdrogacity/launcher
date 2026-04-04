@@ -952,8 +952,11 @@ Public Class Form1
             My.Settings.fabricVersionId = "fabric-loader-" & My.Settings.fabricLoaderVersion & "-" & My.Settings.mcVersion
 
             ''rimuovi marker
+            Try
+                My.Computer.FileSystem.DeleteFile(Path.Combine(gameDir, "fabricInstalled"))
+            Catch ex As Exception
 
-            My.Computer.FileSystem.DeleteFile(Path.Combine(gameDir, "fabricInstalled"))
+            End Try
 
 
             AddLog("Installazione Fabric Loader...")
