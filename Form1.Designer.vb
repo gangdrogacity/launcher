@@ -34,14 +34,6 @@ Partial Class Form1
         Button4 = New Button()
         userLabel = New Label()
         playBtn = New Button()
-        Button2 = New Button()
-        settingsPanel = New Panel()
-        Button8 = New Button()
-        Button6 = New Button()
-        settingsSavebtn = New Button()
-        usernameTxt = New TextBox()
-        Label2 = New Label()
-        Label1 = New Label()
         operationPanel = New Panel()
         operationText = New Label()
         doNotPowerOffPanel = New Panel()
@@ -56,7 +48,6 @@ Partial Class Form1
         Panel1.SuspendLayout()
         CType(PictureBox2, ComponentModel.ISupportInitialize).BeginInit()
         menuPanel.SuspendLayout()
-        settingsPanel.SuspendLayout()
         operationPanel.SuspendLayout()
         doNotPowerOffPanel.SuspendLayout()
         crashPanel.SuspendLayout()
@@ -88,10 +79,10 @@ Partial Class Form1
         ' 
         ' ProgressBar1
         ' 
-        ProgressBar1.ForeColor = Color.White
-        ProgressBar1.Location = New Point(0, 581)
+        ProgressBar1.ForeColor = Color.Green
+        ProgressBar1.Location = New Point(7, 588)
         ProgressBar1.Name = "ProgressBar1"
-        ProgressBar1.Size = New Size(1338, 19)
+        ProgressBar1.Size = New Size(1347, 21)
         ProgressBar1.TabIndex = 2
         ' 
         ' statusText
@@ -100,7 +91,7 @@ Partial Class Form1
         statusText.Font = New Font("Segoe UI", 15F)
         statusText.ForeColor = Color.White
         statusText.ImageAlign = ContentAlignment.TopCenter
-        statusText.Location = New Point(44, 543)
+        statusText.Location = New Point(99, 553)
         statusText.Name = "statusText"
         statusText.Size = New Size(24, 28)
         statusText.TabIndex = 3
@@ -109,34 +100,36 @@ Partial Class Form1
         ' 
         ' Panel1
         ' 
+        Panel1.BackColor = Color.Transparent
         Panel1.Controls.Add(PictureBox2)
         Panel1.Controls.Add(ProgressBar1)
         Panel1.Controls.Add(statusText)
         Panel1.Controls.Add(PictureBox1)
-        Panel1.Location = New Point(4, 45)
+        Panel1.Location = New Point(-7, 45)
         Panel1.Name = "Panel1"
-        Panel1.Size = New Size(1338, 602)
+        Panel1.Size = New Size(1357, 625)
         Panel1.TabIndex = 5
         ' 
         ' PictureBox2
         ' 
-        PictureBox2.Image = My.Resources.Resources.original_a5a6bbdebdd0c283b9e2dae1408882bd
-        PictureBox2.Location = New Point(3, 541)
+        PictureBox2.Image = CType(resources.GetObject("PictureBox2.Image"), Image)
+        PictureBox2.Location = New Point(9, 503)
         PictureBox2.Name = "PictureBox2"
-        PictureBox2.Size = New Size(35, 37)
+        PictureBox2.Size = New Size(88, 81)
         PictureBox2.SizeMode = PictureBoxSizeMode.Zoom
         PictureBox2.TabIndex = 4
         PictureBox2.TabStop = False
         ' 
         ' menuPanel
         ' 
+        menuPanel.BackColor = Color.Transparent
         menuPanel.Controls.Add(Button7)
         menuPanel.Controls.Add(Button4)
         menuPanel.Controls.Add(userLabel)
         menuPanel.Controls.Add(playBtn)
         menuPanel.Location = New Point(4, 35)
         menuPanel.Name = "menuPanel"
-        menuPanel.Size = New Size(1338, 498)
+        menuPanel.Size = New Size(1346, 498)
         menuPanel.TabIndex = 6
         menuPanel.Visible = False
         ' 
@@ -192,105 +185,6 @@ Partial Class Form1
         playBtn.TabIndex = 0
         playBtn.Text = "..."
         playBtn.UseVisualStyleBackColor = False
-        ' 
-        ' Button2
-        ' 
-        Button2.BackColor = Color.FromArgb(CByte(192), CByte(192), CByte(0))
-        Button2.FlatStyle = FlatStyle.Flat
-        Button2.Font = New Font("Segoe UI", 10F, FontStyle.Bold)
-        Button2.ForeColor = Color.White
-        Button2.Location = New Point(500, 118)
-        Button2.Name = "Button2"
-        Button2.Size = New Size(154, 28)
-        Button2.TabIndex = 2
-        Button2.Text = "Reinstalla Minecraft"
-        Button2.UseVisualStyleBackColor = False
-        ' 
-        ' settingsPanel
-        ' 
-        settingsPanel.BackColor = Color.FromArgb(CByte(64), CByte(64), CByte(64))
-        settingsPanel.Controls.Add(Button8)
-        settingsPanel.Controls.Add(Button6)
-        settingsPanel.Controls.Add(Button2)
-        settingsPanel.Controls.Add(settingsSavebtn)
-        settingsPanel.Controls.Add(usernameTxt)
-        settingsPanel.Controls.Add(Label2)
-        settingsPanel.Controls.Add(Label1)
-        settingsPanel.Location = New Point(330, 44)
-        settingsPanel.Name = "settingsPanel"
-        settingsPanel.Size = New Size(667, 280)
-        settingsPanel.TabIndex = 2
-        settingsPanel.Visible = False
-        ' 
-        ' Button8
-        ' 
-        Button8.BackColor = Color.FromArgb(CByte(0), CByte(192), CByte(0))
-        Button8.FlatStyle = FlatStyle.Flat
-        Button8.Font = New Font("Segoe UI", 10F, FontStyle.Bold)
-        Button8.ForeColor = Color.White
-        Button8.Location = New Point(482, 84)
-        Button8.Name = "Button8"
-        Button8.Size = New Size(172, 28)
-        Button8.TabIndex = 7
-        Button8.Text = "Verifica installazione"
-        Button8.UseVisualStyleBackColor = False
-        ' 
-        ' Button6
-        ' 
-        Button6.BackColor = Color.Red
-        Button6.FlatStyle = FlatStyle.Flat
-        Button6.Font = New Font("Segoe UI", 10F, FontStyle.Bold)
-        Button6.ForeColor = Color.White
-        Button6.Location = New Point(530, 152)
-        Button6.Name = "Button6"
-        Button6.Size = New Size(124, 28)
-        Button6.TabIndex = 6
-        Button6.Text = "Reinstalla tutto"
-        Button6.UseVisualStyleBackColor = False
-        ' 
-        ' settingsSavebtn
-        ' 
-        settingsSavebtn.BackColor = Color.Black
-        settingsSavebtn.FlatStyle = FlatStyle.Flat
-        settingsSavebtn.Font = New Font("Segoe UI", 10F, FontStyle.Bold)
-        settingsSavebtn.ForeColor = Color.White
-        settingsSavebtn.Location = New Point(550, 221)
-        settingsSavebtn.Name = "settingsSavebtn"
-        settingsSavebtn.Size = New Size(104, 47)
-        settingsSavebtn.TabIndex = 3
-        settingsSavebtn.Text = "Salva"
-        settingsSavebtn.UseVisualStyleBackColor = False
-        ' 
-        ' usernameTxt
-        ' 
-        usernameTxt.Location = New Point(17, 112)
-        usernameTxt.Name = "usernameTxt"
-        usernameTxt.Size = New Size(171, 23)
-        usernameTxt.TabIndex = 5
-        ' 
-        ' Label2
-        ' 
-        Label2.AutoSize = True
-        Label2.Font = New Font("Segoe UI", 12F)
-        Label2.ForeColor = Color.White
-        Label2.Location = New Point(16, 83)
-        Label2.Name = "Label2"
-        Label2.Size = New Size(81, 21)
-        Label2.TabIndex = 4
-        Label2.Text = "Username"
-        Label2.TextAlign = ContentAlignment.MiddleCenter
-        ' 
-        ' Label1
-        ' 
-        Label1.AutoSize = True
-        Label1.Font = New Font("Segoe UI", 15F)
-        Label1.ForeColor = Color.White
-        Label1.Location = New Point(17, 13)
-        Label1.Name = "Label1"
-        Label1.Size = New Size(125, 28)
-        Label1.TabIndex = 3
-        Label1.Text = "Impostazioni"
-        Label1.TextAlign = ContentAlignment.MiddleCenter
         ' 
         ' operationPanel
         ' 
@@ -388,6 +282,7 @@ Partial Class Form1
         ' versionLabel
         ' 
         versionLabel.AutoSize = True
+        versionLabel.BackColor = Color.Transparent
         versionLabel.ForeColor = Color.White
         versionLabel.Location = New Point(6, 6)
         versionLabel.Name = "versionLabel"
@@ -414,13 +309,14 @@ Partial Class Form1
         AutoScaleDimensions = New SizeF(7F, 15F)
         AutoScaleMode = AutoScaleMode.Font
         BackColor = SystemColors.ActiveCaptionText
+        BackgroundImage = CType(resources.GetObject("$this.BackgroundImage"), Image)
+        BackgroundImageLayout = ImageLayout.Stretch
         ClientSize = New Size(1345, 652)
         Controls.Add(Button5)
         Controls.Add(Button1)
         Controls.Add(versionLabel)
         Controls.Add(doNotPowerOffPanel)
         Controls.Add(operationPanel)
-        Controls.Add(settingsPanel)
         Controls.Add(crashPanel)
         Controls.Add(menuPanel)
         Controls.Add(Panel1)
@@ -436,8 +332,6 @@ Partial Class Form1
         CType(PictureBox2, ComponentModel.ISupportInitialize).EndInit()
         menuPanel.ResumeLayout(False)
         menuPanel.PerformLayout()
-        settingsPanel.ResumeLayout(False)
-        settingsPanel.PerformLayout()
         operationPanel.ResumeLayout(False)
         operationPanel.PerformLayout()
         doNotPowerOffPanel.ResumeLayout(False)
@@ -455,13 +349,7 @@ Partial Class Form1
     Friend WithEvents Panel1 As Panel
     Friend WithEvents menuPanel As Panel
     Friend WithEvents playBtn As Button
-    Friend WithEvents settingsPanel As Panel
     Friend WithEvents userLabel As Label
-    Friend WithEvents settingsSavebtn As Button
-    Friend WithEvents usernameTxt As TextBox
-    Friend WithEvents Label2 As Label
-    Friend WithEvents Label1 As Label
-    Friend WithEvents Button2 As Button
     Friend WithEvents operationPanel As Panel
     Friend WithEvents operationText As Label
     Friend WithEvents doNotPowerOffPanel As Panel
@@ -474,8 +362,6 @@ Partial Class Form1
     Friend WithEvents versionLabel As Label
     Friend WithEvents PictureBox2 As PictureBox
     Friend WithEvents Button5 As Button
-    Friend WithEvents Button6 As Button
     Friend WithEvents Button7 As Button
-    Friend WithEvents Button8 As Button
 
 End Class

@@ -64,6 +64,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Update="Settings.vb" />
     <Compile Update="My Project\Application.Designer.vb">
       <DesignTime>True</DesignTime>
       <AutoGen>True</AutoGen>

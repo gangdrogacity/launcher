@@ -44,7 +44,7 @@ Public Class Form1
     Dim WithEvents client As New Net.WebClient()
     Dim mcDownloader As New MinecraftDownloader()
     Dim mcLauncher As New MinecraftLauncher()
-    Dim mcTask As Process
+    Public mcTask As Process
     Dim mcToken As CancellationToken
     Dim processMonitorTimer As New System.Windows.Forms.Timer()
 
@@ -2179,8 +2179,7 @@ Public Class Form1
                 playBtn.BackColor = Color.Green
                 playBtn.ForeColor = Color.White
                 MessageBox.Show("Imposta un nome utente prima di giocare.", "Nome utente mancante", MessageBoxButtons.OK, MessageBoxIcon.Warning)
-                menuPanel.Visible = False
-                settingsPanel.Visible = True
+                Settings.Show()
                 Return
             End If
 
@@ -2313,27 +2312,11 @@ Public Class Form1
     End Sub
 
     Private Sub userLabel_Click(sender As Object, e As EventArgs) Handles userLabel.Click
-        settingsPanel.Visible = True
-        menuPanel.Visible = False
+        Settings.Show()
 
     End Sub
 
-    Private Sub settingsSavebtn_Click(sender As Object, e As EventArgs) Handles settingsSavebtn.Click
-        If usernameTxt.Text IsNot Nothing And usernameTxt.Text.Length < 3 Then
-            MessageBox.Show("Il nome utente deve essere di almeno 3 caratteri.", "Nome utente non valido", MessageBoxButtons.OK, MessageBoxIcon.Warning)
-            Return
-        End If
-        My.Settings.username = usernameTxt.Text
-        settingsPanel.Visible = False
-        menuPanel.Visible = True
-        userLabel.Text = My.Settings.username
-    End Sub
 
-    Private Sub settingsPanel_VisibleChanged(sender As Object, e As EventArgs) Handles settingsPanel.VisibleChanged
-        If settingsPanel.Visible Then
-            usernameTxt.Text = My.Settings.username
-        End If
-    End Sub
 
     Private Sub menuPanel_VisibleChanged(sender As Object, e As EventArgs) Handles menuPanel.VisibleChanged
         If menuPanel.Visible Then
@@ -2343,41 +2326,34 @@ Public Class Form1
         End If
     End Sub
 
-    Private Async Sub Button2_Click(sender As Object, e As EventArgs) Handles Button2.Click
-        Dim result = MessageBox.Show("Sei sicuro di voler reinstallare minecraft?", "Conferma", MessageBoxButtons.YesNo, MessageBoxIcon.Question)
-        If Not mcTask.HasExited Then
-            MessageBox.Show("Chiudi prima Minecraft, poi riprova.", "Minecraft in esecuzione", MessageBoxButtons.OK, MessageBoxIcon.Information)
-            Return
+    Public Async Sub MCReinstall()
+        operationText.Text = "Resetto Minecraft..."
+        operationPanel.Visible = True
+        doNotPowerOffPanel.Visible = True
+        Await Task.Delay(1000)
+        If Directory.Exists(gameDir) Then
+            Try
+                Await RemoveAllNonManifestFiles()
+                ' Rimuovi tutti i marker di stato
+                File.Delete(Path.Combine(gameDir, "version.txt"))
+                File.Delete(Path.Combine(gameDir, "fabricInstalled"))
+                ' Rimuovi anche eventuali marker vecchi Forge (legacy/migrazione)
+                Try : File.Delete(Path.Combine(gameDir, "forgeInstalled")) : Catch : End Try
+                Try : File.Delete(Path.Combine(gameDir, "forgeDownloaded")) : Catch : End Try
+                Try : File.Delete(Path.Combine(minecraftDir, "forgeInstalled")) : Catch : End Try
+                Try : File.Delete(Path.Combine(minecraftDir, "forgeDownloaded")) : Catch : End Try
+                menuPanel.Visible = False
+                operationPanel.Visible = False
+                Panel1.Visible = True
+                boot()
+            Catch ex As Exception
+                MessageBox.Show($"Si è verificato un errore durante la reinstallazione: {ex.Message}", "Errore", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                Close()
+            End Try
+        Else
+            MessageBox.Show("La directory di gioco non esiste.", "Errore", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End If
-        If result = DialogResult.Yes Then
-            settingsPanel.Visible = False
-            operationText.Text = "Resetto Minecraft..."
-            operationPanel.Visible = True
-            doNotPowerOffPanel.Visible = True
-            Await Task.Delay(1000)
-            If Directory.Exists(gameDir) Then
-                Try
-                    Await RemoveAllNonManifestFiles()
-                    ' Rimuovi tutti i marker di stato
-                    File.Delete(Path.Combine(gameDir, "version.txt"))
-                    File.Delete(Path.Combine(gameDir, "fabricInstalled"))
-                    ' Rimuovi anche eventuali marker vecchi Forge (legacy/migrazione)
-                    Try : File.Delete(Path.Combine(gameDir, "forgeInstalled")) : Catch : End Try
-                    Try : File.Delete(Path.Combine(gameDir, "forgeDownloaded")) : Catch : End Try
-                    Try : File.Delete(Path.Combine(minecraftDir, "forgeInstalled")) : Catch : End Try
-                    Try : File.Delete(Path.Combine(minecraftDir, "forgeDownloaded")) : Catch : End Try
-                    menuPanel.Visible = False
-                    operationPanel.Visible = False
-                    Panel1.Visible = True
-                    boot()
-                Catch ex As Exception
-                    MessageBox.Show($"Si è verificato un errore durante la reinstallazione: {ex.Message}", "Errore", MessageBoxButtons.OK, MessageBoxIcon.Error)
-                    Close()
-                End Try
-            Else
-                MessageBox.Show("La directory di gioco non esiste.", "Errore", MessageBoxButtons.OK, MessageBoxIcon.Error)
-            End If
-        End If
+
     End Sub
 
     Private Sub Button3_Click(sender As Object, e As EventArgs) Handles Button3.Click
@@ -2477,33 +2453,17 @@ Public Class Form1
     End Sub
 
     Private Sub Button4_Click(sender As Object, e As EventArgs) Handles Button4.Click
-        menuPanel.Visible = False
-        settingsPanel.Visible = True
+        Settings.Show()
     End Sub
 
     Private Sub Button5_Click(sender As Object, e As EventArgs) Handles Button5.Click
         Me.WindowState = FormWindowState.Minimized
     End Sub
 
-    Private Sub Button6_Click(sender As Object, e As EventArgs) Handles Button6.Click
-        Dim result = MessageBox.Show("Sei sicuro di voler reinstallare tutto? Verranno rimossi Minecraft, cache, download e dati pacchetti.", "Conferma", MessageBoxButtons.YesNo, MessageBoxIcon.Warning)
+    Public Sub ReinstallAll()
 
-        If result <> DialogResult.Yes Then
-            Return
-        End If
 
-        If mcTask IsNot Nothing Then
-            Try
-                If Not mcTask.HasExited Then
-                    MessageBox.Show("Chiudi prima Minecraft, poi riprova.", "Minecraft in esecuzione", MessageBoxButtons.OK, MessageBoxIcon.Information)
-                    Return
-                End If
-            Catch
-                ' Ignora eventuali errori di stato processo
-            End Try
-        End If
 
-        settingsPanel.Visible = False
         menuPanel.Visible = False
         operationText.Text = "Reset completo in corso..."
         operationPanel.Visible = True
@@ -2568,8 +2528,7 @@ Public Class Form1
                     playBtn.BackColor = Color.Green
                     playBtn.ForeColor = Color.White
                     MessageBox.Show("Imposta un nome utente prima di giocare.", "Nome utente mancante", MessageBoxButtons.OK, MessageBoxIcon.Warning)
-                    menuPanel.Visible = False
-                    settingsPanel.Visible = True
+                    Settings.Show()
                     Return
                 End If
 
@@ -2652,21 +2611,7 @@ Public Class Form1
         End If
     End Sub
 
-    Private Sub Button8_Click(sender As Object, e As EventArgs) Handles Button8.Click
-
-
-        If mcTask IsNot Nothing Then
-            Try
-                If Not mcTask.HasExited Then
-                    MessageBox.Show("Chiudi prima Minecraft, poi riprova.", "Minecraft in esecuzione", MessageBoxButtons.OK, MessageBoxIcon.Information)
-                    Return
-                End If
-            Catch
-                ' Ignora eventuali errori di stato processo
-            End Try
-        End If
-
-        settingsPanel.Visible = False
+    Public Sub VerifyInstallation()
         menuPanel.Visible = False
         operationText.Text = "Verifica in corso..."
         operationPanel.Visible = True
