@@ -74,6 +74,54 @@ Namespace My
                 Return CType(Me("version"),String)
             End Get
         End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
+         Global.System.Configuration.DefaultSettingValueAttribute("")>  _
+        Public Property fabricLoaderVersion() As String
+            Get
+                Return CType(Me("fabricLoaderVersion"),String)
+            End Get
+            Set
+                Me("fabricLoaderVersion") = value
+            End Set
+        End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
+         Global.System.Configuration.DefaultSettingValueAttribute("")>  _
+        Public Property mcVersion() As String
+            Get
+                Return CType(Me("mcVersion"),String)
+            End Get
+            Set
+                Me("mcVersion") = value
+            End Set
+        End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
+         Global.System.Configuration.DefaultSettingValueAttribute("")>  _
+        Public Property fabricVersionId() As String
+            Get
+                Return CType(Me("fabricVersionId"),String)
+            End Get
+            Set
+                Me("fabricVersionId") = value
+            End Set
+        End Property
+        
+        <Global.System.Configuration.UserScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
+         Global.System.Configuration.DefaultSettingValueAttribute("")>  _
+        Public Property currentBranch() As String
+            Get
+                Return CType(Me("currentBranch"),String)
+            End Get
+            Set
+                Me("currentBranch") = value
+            End Set
+        End Property
     End Class
 End Namespace
 

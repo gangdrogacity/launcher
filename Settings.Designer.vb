@@ -33,6 +33,7 @@ Partial Class Settings
         Label2 = New Label()
         Label1 = New Label()
         Panel1 = New Panel()
+        Button3 = New Button()
         settingsPanel.SuspendLayout()
         Panel1.SuspendLayout()
         SuspendLayout()
@@ -54,6 +55,7 @@ Partial Class Settings
         ' settingsPanel
         ' 
         settingsPanel.BackColor = Color.FromArgb(CByte(64), CByte(64), CByte(64))
+        settingsPanel.Controls.Add(Button3)
         settingsPanel.Controls.Add(Button1)
         settingsPanel.Controls.Add(Button8)
         settingsPanel.Controls.Add(Button6)
@@ -74,7 +76,7 @@ Partial Class Settings
         Button8.FlatStyle = FlatStyle.Flat
         Button8.Font = New Font("Segoe UI", 10F, FontStyle.Bold)
         Button8.ForeColor = Color.White
-        Button8.Location = New Point(72, 237)
+        Button8.Location = New Point(73, 224)
         Button8.Name = "Button8"
         Button8.Size = New Size(172, 28)
         Button8.TabIndex = 7
@@ -87,7 +89,7 @@ Partial Class Settings
         Button6.FlatStyle = FlatStyle.Flat
         Button6.Font = New Font("Segoe UI", 10F, FontStyle.Bold)
         Button6.ForeColor = Color.White
-        Button6.Location = New Point(94, 305)
+        Button6.Location = New Point(95, 292)
         Button6.Name = "Button6"
         Button6.Size = New Size(124, 28)
         Button6.TabIndex = 6
@@ -100,7 +102,7 @@ Partial Class Settings
         Button2.FlatStyle = FlatStyle.Flat
         Button2.Font = New Font("Segoe UI", 10F, FontStyle.Bold)
         Button2.ForeColor = Color.White
-        Button2.Location = New Point(80, 271)
+        Button2.Location = New Point(81, 258)
         Button2.Name = "Button2"
         Button2.Size = New Size(154, 28)
         Button2.TabIndex = 2
@@ -164,6 +166,19 @@ Partial Class Settings
         Panel1.Size = New Size(318, 375)
         Panel1.TabIndex = 5
         ' 
+        ' Button3
+        ' 
+        Button3.BackColor = Color.Black
+        Button3.FlatStyle = FlatStyle.Flat
+        Button3.Font = New Font("Segoe UI", 7F, FontStyle.Bold)
+        Button3.ForeColor = Color.White
+        Button3.Location = New Point(222, 348)
+        Button3.Name = "Button3"
+        Button3.Size = New Size(88, 24)
+        Button3.TabIndex = 8
+        Button3.Text = "Cambia branch"
+        Button3.UseVisualStyleBackColor = False
+        ' 
         ' Settings
         ' 
         AutoScaleDimensions = New SizeF(7F, 15F)
@@ -194,5 +209,6 @@ Partial Class Settings
     Friend WithEvents Label2 As Label
     Friend WithEvents Label1 As Label
     Friend WithEvents Panel1 As Panel
+    Friend WithEvents Button3 As Button
 
 End Class

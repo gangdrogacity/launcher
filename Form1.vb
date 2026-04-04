@@ -16,16 +16,13 @@ Public Class Form1
     Dim downloadDir As String = Path.Combine(minecraftDir, "downloads")
 
     Public devmode As Boolean = False
-    Dim repobranch As String = "main"
-    Dim data = "https://github.com/jamnaga/wtf-modpack/archive/refs/heads/" & repobranch & ".zip"
-    Dim repoBasepath As String = "https://raw.githubusercontent.com/jamnaga/wtf-modpack/refs/heads/" & repobranch & "/"
+    Public repobranch As String = "main"
+    Public data = "https://github.com/jamnaga/wtf-modpack/archive/refs/heads/" & repobranch & ".zip"
+    Public repoBasepath As String = "https://raw.githubusercontent.com/jamnaga/wtf-modpack/refs/heads/" & repobranch & "/"
 
     Dim zipPath As String = Path.Combine(downloadDir, "modpack.zip")
 
     ' Costanti Fabric
-    Dim fabricLoaderVersion As String = "0.18.4"
-    Dim mcVersion As String = "1.20.1"
-    Dim fabricVersionId As String = "fabric-loader-0.18.4-1.20.1"
 
     Dim javaUrl As String = ""
 
@@ -47,6 +44,7 @@ Public Class Form1
     Public mcTask As Process
     Dim mcToken As CancellationToken
     Dim processMonitorTimer As New System.Windows.Forms.Timer()
+    Dim manifest As Newtonsoft.Json.Linq.JObject
 
     ' Cache per le verifiche hash
     Private fileHashCache As New Dictionary(Of String, String)()
@@ -88,7 +86,9 @@ Public Class Form1
 
     Dim downloading As Boolean = True
 
-    Private Async Sub boot()
+    Public Async Sub boot()
+        menuPanel.Visible = False
+        Panel1.Visible = True
 
         ProgressBar1.Value = 10
         Dim updater As New UpdateChecker()
@@ -118,19 +118,8 @@ Public Class Form1
         AddLog("Connessione a internet rilevata.")
         Await Task.Delay(1000)
 
-        ' Dev mode: selezione branch prima del sync
-        If devmode Then
-            AddLog("[DEV] Recupero branch disponibili...")
-            Dim selectedBranch = Await ShowBranchSelectionAsync()
-            If selectedBranch Is Nothing Then
-                AddLog("[DEV] Nessun branch selezionato, chiusura.")
-                Return
-            End If
-            repobranch = selectedBranch
-            data = "https://github.com/jamnaga/wtf-modpack/archive/refs/heads/" & repobranch & ".zip"
-            repoBasepath = "https://raw.githubusercontent.com/jamnaga/wtf-modpack/refs/heads/" & repobranch & "/"
-            AddLog($"[DEV] Branch selezionato: {repobranch}")
-        End If
+
+
 
         ProgressBar1.Value = 20
         Dim versionString As String = updater.getLatestversionString()
@@ -274,10 +263,29 @@ Public Class Form1
         Catch
             ' Ignora errori se il file non esiste
         End Try
-
+        If My.Settings.currentBranch = "" Then
+            My.Settings.currentBranch = repobranch
+            data = "https://github.com/jamnaga/wtf-modpack/archive/refs/heads/" & repobranch & ".zip"
+            repoBasepath = "https://raw.githubusercontent.com/jamnaga/wtf-modpack/refs/heads/" & repobranch & "/"
+        Else
+            repobranch = My.Settings.currentBranch
+            data = "https://github.com/jamnaga/wtf-modpack/archive/refs/heads/" & repobranch & ".zip"
+            repoBasepath = "https://raw.githubusercontent.com/jamnaga/wtf-modpack/refs/heads/" & repobranch & "/"
+        End If
         Dim manifestUrl = repoBasepath & "manifest.json"
         Dim manifestPath = Path.Combine(downloadDir, "manifest.json")
 
+        ' Download del manifest
+        Using client As New Net.WebClient()
+            client.Headers.Add("User-Agent", "GangDrogaCity-Launcher/1.0")
+
+            client.CachePolicy = New System.Net.Cache.RequestCachePolicy(System.Net.Cache.RequestCacheLevel.NoCacheNoStore)
+
+
+            Await DownloadFileTaskAsync(client, New Uri(manifestUrl), manifestPath, False)
+        End Using
+        Dim json As String = Await System.IO.File.ReadAllTextAsync(manifestPath)
+        manifest = Newtonsoft.Json.Linq.JObject.Parse(json)
         Try
             Try
                 remoteCommitId = Await GetRemoteModpackCommitIdAsync()
@@ -301,21 +309,12 @@ Public Class Form1
 
             End Try
 
-            ' Download del manifest
-            Using client As New Net.WebClient()
-                client.Headers.Add("User-Agent", "GangDrogaCity-Launcher/1.0")
-
-                client.CachePolicy = New System.Net.Cache.RequestCachePolicy(System.Net.Cache.RequestCacheLevel.NoCacheNoStore)
-
-
-                Await DownloadFileTaskAsync(client, New Uri(manifestUrl), manifestPath, False)
-            End Using
 
             AddLog("Analisi file necessari...")
 
             ' Lettura e parsing del manifest
-            Dim json As String = Await System.IO.File.ReadAllTextAsync(manifestPath)
-            Dim manifest As Newtonsoft.Json.Linq.JObject = Newtonsoft.Json.Linq.JObject.Parse(json)
+
+
             Dim allFiles = manifest("files").ToArray()
             Dim files = allFiles.Where(Function(f) Not ShouldSkipManifestFile(f("path").ToObject(Of String)())).ToArray()
             Dim skippedServerFiles As Integer = allFiles.Length - files.Length
@@ -460,9 +459,13 @@ Public Class Form1
             ' Procedi al passo successivo
             If Not step1only Then
                 If CheckJavaStatusAsync() Then
+
+
+
                     Await step2()
-                Else
-                    errorRed(" Java Runtime non trovato o non valido.")
+
+                    Else
+                        errorRed(" Java Runtime non trovato o non valido.")
                 End If
 
             End If
@@ -933,22 +936,35 @@ Public Class Form1
         End If
 
         ' Verifica se Fabric è già installato
-        If File.Exists(fabricInstalledMarker) AndAlso fabricInst.IsFabricInstalled(fabricLoaderVersion, mcVersion, gameDir) Then
-            AddLog($"✓ Fabric Loader {fabricLoaderVersion} già installato")
-            ProgressBar1.Value = 65
-            Await step3()
-            Return
+        If File.Exists(fabricInstalledMarker) AndAlso fabricInst.IsFabricInstalled(My.Settings.fabricLoaderVersion, My.Settings.mcVersion, gameDir) Then
+            If My.Settings.fabricLoaderVersion = manifest("fabricLoaderVersion").ToObject(Of String)() Or My.Settings.mcVersion = manifest("mcVersion").ToObject(Of String)() Then
+                AddLog($"✓ Fabric Loader {My.Settings.fabricLoaderVersion} già installato")
+                ProgressBar1.Value = 65
+                Await step3()
+                Return
+            End If
+
         End If
 
         Try
+            My.Settings.fabricLoaderVersion = manifest("fabricLoaderVersion").ToObject(Of String)()
+            My.Settings.mcVersion = manifest("mcVersion").ToObject(Of String)()
+            My.Settings.fabricVersionId = "fabric-loader-" & My.Settings.fabricLoaderVersion & "-" & My.Settings.mcVersion
+
+            ''rimuovi marker
+
+            My.Computer.FileSystem.DeleteFile(Path.Combine(gameDir, "fabricInstalled"))
+
+
             AddLog("Installazione Fabric Loader...")
             ProgressBar1.Value = 45
             Await Task.Delay(200)
 
             ' Installa Fabric tramite Meta API (scarica profilo JSON + librerie)
-            Dim success As Boolean = Await fabricInst.InstallFabric(fabricLoaderVersion, mcVersion, gameDir)
+            Dim success As Boolean = Await fabricInst.InstallFabric(My.Settings.fabricLoaderVersion, My.Settings.mcVersion, gameDir)
 
             If success Then
+
                 ProgressBar1.Value = 65
                 AddLog("Fabric Loader installato!")
                 ' Non serve più scrivere il marker qui, lo scriviamo dopo step3
@@ -982,10 +998,10 @@ Public Class Form1
                 AddLog("Download Minecraft...")
                 Await Task.Delay(500)
                 Try
-                    Await mcDownloader.DownloadMinecraftVersion(mcVersion, gameDir)
+                    Await mcDownloader.DownloadMinecraftVersion(My.Settings.mcVersion, gameDir)
                 Catch ex As Exception
                     ' Fallback se il metodo non è async
-                    Task.Run(Sub() mcDownloader.DownloadMinecraftVersion(mcVersion, gameDir))
+                    Task.Run(Sub() mcDownloader.DownloadMinecraftVersion(My.Settings.mcVersion, gameDir))
                 End Try
 
                 ProgressBar1.Value = 85
@@ -1074,11 +1090,11 @@ Public Class Form1
         ' CRITICO: Verifica e scarica TUTTI i componenti di Minecraft vanilla
         ' Questo include: client.jar, assets (audio + lingue), librerie vanilla
         AddLog("Verifica completezza Minecraft vanilla...")
-        Await mcDownloader.DownloadMinecraftVersion(mcVersion, gameDir)
+        Await mcDownloader.DownloadMinecraftVersion(My.Settings.mcVersion, gameDir)
 
         ' Scarica le librerie specifiche di Fabric (fabric-loader, intermediary, ecc.)
         AddLog("Verifica librerie Fabric...")
-        Await mcDownloader.DownloadVersionDependencies(fabricVersionId, gameDir)
+        Await mcDownloader.DownloadVersionDependencies(My.Settings.fabricVersionId, gameDir)
 
         doNotPowerOffPanel.Visible = False
         Panel1.Visible = False
@@ -1178,7 +1194,7 @@ Public Class Form1
                 Catch
                 End Try
 
-                If attempt < maxRetries Then
+                If attempt <maxRetries Then
                     AddLog($"{progressText} | retry {attempt + 1}/{maxRetries}")
                     shouldDelay = True
                 End If
@@ -1448,7 +1464,7 @@ Public Class Form1
     ''' Recupera i branch dal repo GitHub e mostra un dialog di selezione.
     ''' Restituisce il nome del branch selezionato, oppure Nothing se annullato.
     ''' </summary>
-    Private Async Function ShowBranchSelectionAsync() As Task(Of String)
+    Public Async Function ShowBranchSelectionAsync() As Task(Of String)
         Try
             Dim github As New GitHubClient(New ProductHeaderValue("GangDrogaCity-Launcher"))
             Dim branches = Await github.Repository.Branch.GetAll("jamnaga", "wtf-modpack")
@@ -2186,13 +2202,13 @@ Public Class Form1
             ' Verifica e riscarica componenti Minecraft mancanti
             ' IMPORTANTE: Questo verifica e scarica assets vanilla mancanti (suoni, lingue)
             AddLog("Verifica completezza Minecraft vanilla...")
-            Await mcDownloader.DownloadMinecraftVersion(mcVersion, gameDir)
+            Await mcDownloader.DownloadMinecraftVersion(My.Settings.mcVersion, gameDir)
 
             ' Verifica librerie Fabric
             AddLog("Verifica librerie Fabric...")
-            Await mcDownloader.DownloadVersionDependencies(fabricVersionId, gameDir)
+            Await mcDownloader.DownloadVersionDependencies(My.Settings.fabricVersionId, gameDir)
 
-            mcTask = Await mcLauncher.LaunchMinecraft(My.Settings.username, fabricVersionId, gameDir, 4096)
+            mcTask = Await mcLauncher.LaunchMinecraft(My.Settings.username, My.Settings.fabricVersionId, gameDir, 4096)
 
             If mcTask IsNot Nothing Then
                 Await Task.Delay(2500)
@@ -2535,11 +2551,11 @@ Public Class Form1
                 ' Verifica e riscarica componenti Minecraft mancanti
                 ' IMPORTANTE: Questo verifica e scarica assets vanilla mancanti (suoni, lingue)
                 AddLog("Verifica Minecraft vanilla...")
-                Await mcDownloader.DownloadMinecraftVersion(mcVersion, gameDir)
+                Await mcDownloader.DownloadMinecraftVersion(My.Settings.mcVersion, gameDir)
 
                 ' Verifica librerie Fabric
                 AddLog("Verifica librerie Fabric...")
-                Await mcDownloader.DownloadVersionDependencies(fabricVersionId, gameDir)
+                Await mcDownloader.DownloadVersionDependencies(My.Settings.fabricVersionId, gameDir)
 
                 ' Rimuove le mod client-side per la modalità grafica ridotta
                 Dim modsDir As String = Path.Combine(gameDir, "mods")
@@ -2565,7 +2581,7 @@ Public Class Form1
 
 
 
-                mcTask = Await mcLauncher.LaunchMinecraft(My.Settings.username, fabricVersionId, gameDir, 4096)
+                mcTask = Await mcLauncher.LaunchMinecraft(My.Settings.username, My.Settings.fabricVersionId, gameDir, 4096)
 
                 If mcTask IsNot Nothing Then
                     Await Task.Delay(2500)

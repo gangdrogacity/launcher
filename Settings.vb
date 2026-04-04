@@ -12,7 +12,7 @@ Public Class Settings
         My.Settings.username = usernameTxt.Text
         settingsPanel.Visible = False
         Form1.userLabel.Text = My.Settings.username
-        Me.Close()
+        Close()
     End Sub
 
     Private Sub Button8_Click(sender As Object, e As EventArgs) Handles Button8.Click
@@ -88,4 +88,22 @@ Public Class Settings
         drag = False
     End Sub
 
+    Private Async Sub Button3_Click(sender As Object, e As EventArgs) Handles Button3.Click
+        Dim result As DialogResult = MessageBox.Show("Sei sicuro di voler cambiare branch? Potresti non poter giocare a GangDrogaCity Online o alcune feature potrebbero essere disattivate: procedi solo se sai cosa stai facendo.", "Conferma", MessageBoxButtons.YesNo, MessageBoxIcon.Warning)
+        If result <> DialogResult.Yes Then
+            Return
+        End If
+        Dim selectedBranch = Await Form1.ShowBranchSelectionAsync()
+        If selectedBranch Is Nothing Then
+            Form1.AddLog("[DEV] Nessun branch selezionato, chiusura.")
+            Return
+        End If
+        Form1.repobranch = selectedBranch
+        My.Settings.currentBranch = Form1.repobranch
+        Form1.data = "https://github.com/jamnaga/wtf-modpack/archive/refs/heads/" & Form1.repobranch & ".zip"
+        Form1.repoBasepath = "https://raw.githubusercontent.com/jamnaga/wtf-modpack/refs/heads/" & Form1.repobranch & "/"
+        Form1.AddLog($"[DEV] Branch selezionato: {Form1.repobranch}")
+        Form1.boot()
+        Me.Close()
+    End Sub
 End Class

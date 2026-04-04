@@ -8,5 +8,17 @@
     <Setting Name="version" Type="System.String" Scope="Application">
       <Value Profile="(Default)">2.2.4</Value>
     </Setting>
+    <Setting Name="fabricLoaderVersion" Type="System.String" Scope="User">
+      <Value Profile="(Default)" />
+    </Setting>
+    <Setting Name="mcVersion" Type="System.String" Scope="User">
+      <Value Profile="(Default)" />
+    </Setting>
+    <Setting Name="fabricVersionId" Type="System.String" Scope="User">
+      <Value Profile="(Default)" />
+    </Setting>
+    <Setting Name="currentBranch" Type="System.String" Scope="User">
+      <Value Profile="(Default)" />
+    </Setting>
   </Settings>
 </SettingsFile>
