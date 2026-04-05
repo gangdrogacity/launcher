@@ -216,7 +216,8 @@ Public Class Form1
                     .UseShellExecute = True,
                     .WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory,
                     .WindowStyle = ProcessWindowStyle.Normal,
-                    .CreateNoWindow = False
+                    .CreateNoWindow = False,
+                    .Verb = "runas"
                 }
 
                 Process.Start(startInfo)
@@ -1570,6 +1571,10 @@ Public Class Form1
     Private Sub Form1_Load(sender As Object, e As EventArgs) Handles MyBase.Load
         statusText.Text = "Avvio..."
         versionLabel.Text = "v" & My.Settings.version
+        If My.Settings.currentBranch = "" Then
+            My.Settings.currentBranch = repobranch
+        End If
+        versionLabel.Text = versionLabel.Text & " | " & My.Settings.currentBranch
         downloadProgressTimer.Interval = 100 ' Aggiorna ogni 100ms
         AddHandler downloadProgressTimer.Tick, AddressOf DownloadProgressTimer_Tick
         Dim timer As New System.Windows.Forms.Timer()
