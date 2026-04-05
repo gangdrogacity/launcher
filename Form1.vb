@@ -87,6 +87,11 @@ Public Class Form1
     Dim downloading As Boolean = True
 
     Public Async Sub boot()
+        versionLabel.Text = "v" & My.Settings.version
+        If My.Settings.currentBranch = "" Then
+            My.Settings.currentBranch = repobranch
+        End If
+        versionLabel.Text = versionLabel.Text & " | " & My.Settings.currentBranch
         menuPanel.Visible = False
         Panel1.Visible = True
 
@@ -951,7 +956,7 @@ Public Class Form1
             My.Settings.fabricLoaderVersion = manifest("fabricLoaderVersion").ToObject(Of String)()
             My.Settings.mcVersion = manifest("mcVersion").ToObject(Of String)()
             My.Settings.fabricVersionId = "fabric-loader-" & My.Settings.fabricLoaderVersion & "-" & My.Settings.mcVersion
-
+            My.Settings.Save()
             ''rimuovi marker
             Try
                 My.Computer.FileSystem.DeleteFile(Path.Combine(gameDir, "fabricInstalled"))

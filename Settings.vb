@@ -12,6 +12,7 @@ Public Class Settings
         My.Settings.username = usernameTxt.Text
         settingsPanel.Visible = False
         Form1.userLabel.Text = My.Settings.username
+        My.Settings.Save()
         Close()
     End Sub
 
