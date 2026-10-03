@@ -47,8 +47,8 @@ Public Module DirectoryCleaner
             If leftovers.Length = 0 Then Return Task.CompletedTask
 
             Return Task.Run(Sub()
-                                For Each dir In leftovers
-                                    DeleteTreeParallel(dir)
+                                For Each trashDir As String In leftovers
+                                    DeleteTreeParallel(trashDir)
                                 Next
                             End Sub)
         Catch
@@ -79,7 +79,7 @@ Public Module DirectoryCleaner
                                  End Try
                              End Sub)
 
-            For Each f In Directory.GetFiles(root)
+            For Each f As String In Directory.GetFiles(root)
                 Try
                     File.SetAttributes(f, FileAttributes.Normal)
                     File.Delete(f)
@@ -110,8 +110,8 @@ Public Module DirectoryCleaner
         Return deleted
     End Function
 
-    Private Sub ClearReadOnly(dir As String)
-        For Each f In Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories)
+    Private Sub ClearReadOnly(folder As String)
+        For Each f As String In Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories)
             Try
                 File.SetAttributes(f, FileAttributes.Normal)
             Catch
