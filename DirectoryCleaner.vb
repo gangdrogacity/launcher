@@ -57,6 +57,24 @@ Public Module DirectoryCleaner
     End Function
 
     ''' <summary>
+    ''' Elimina in background le cartelle "cestino" (*.trash-*) rimaste DENTRO la cartella indicata.
+    ''' </summary>
+    Public Function CleanupLeftoverTrashIn(parentDir As String) As Task
+        Try
+            If String.IsNullOrEmpty(parentDir) OrElse Not Directory.Exists(parentDir) Then Return Task.CompletedTask
+            Dim leftovers = Directory.GetDirectories(parentDir, "*" & TrashSuffix & "*")
+            If leftovers.Length = 0 Then Return Task.CompletedTask
+            Return Task.Run(Sub()
+                                For Each trashDir As String In leftovers
+                                    DeleteTreeParallel(trashDir)
+                                Next
+                            End Sub)
+        Catch
+            Return Task.CompletedTask
+        End Try
+    End Function
+
+    ''' <summary>
     ''' Elimina un albero di cartelle usando piu' thread sulle sottocartelle di primo livello.
     ''' Gli errori sui singoli elementi vengono ignorati: cio' che resta viene ripulito
     ''' al prossimo avvio da CleanupLeftoverTrash.

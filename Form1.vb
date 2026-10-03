@@ -15,6 +15,12 @@ Public Class Form1
     Public gameDir As String = Path.Combine(minecraftDir, "game")
     Dim downloadDir As String = Path.Combine(minecraftDir, "downloads")
 
+    ' Separazione user data / game data: impostazioni, keybind e waypoint vivono in
+    ' %APPDATA%\.gangdrogacity\userdata e sopravvivono a sync e reinstallazioni
+    Private udm As New UserDataManager(minecraftDir, gameDir)
+    Private pendingUserDataRestore As Boolean = False
+    Private skipUserDataBackup As Boolean = False
+
     Public devmode As Boolean = False
     Public repobranch As String = "main"
     Public data = "https://github.com/jamnaga/wtf-modpack/archive/refs/heads/" & repobranch & ".zip"
@@ -104,6 +110,19 @@ Public Class Form1
 
         ' Elimina in background eventuali cartelle "cestino" rimaste da un reset precedente
         DirectoryCleaner.CleanupLeftoverTrash(minecraftDir)
+        DirectoryCleaner.CleanupLeftoverTrashIn(minecraftDir)
+
+        ' Backup dei dati utente (impostazioni, keybind, waypoint) nel mirror userdata.
+        ' Dopo un reset il backup viene saltato: il mirror contiene gia' i dati da ripristinare.
+        If skipUserDataBackup Then
+            skipUserDataBackup = False
+        Else
+            Try
+                udm.LoadRules(downloadDir)
+                Await Task.Run(Function() udm.Backup())
+            Catch
+            End Try
+        End If
 
         AddLog("Avvio...")
         Await Task.Delay(1000)
@@ -249,6 +268,47 @@ Public Class Form1
 
     End Sub
 
+    ''' <summary>
+    ''' Scarica dal repo del modpack i file di regole facoltativi (.userdata, .oncelist,
+    ''' .gitignore, .manifestignore) in downloadDir. Se un file non esiste piu' nel repo (404)
+    ''' la copia locale viene rimossa; altri errori lasciano la copia precedente.
+    ''' </summary>
+    Private Async Function DownloadUserDataRulesAsync() As Task
+        For Each ruleFile As String In UserDataManager.RuleFileNames
+            Dim localPath As String = Path.Combine(downloadDir, ruleFile)
+            Dim tmpPath As String = localPath & ".tmp"
+            Try
+                Using client As New Net.WebClient()
+                    client.Headers.Add("User-Agent", "GangDrogaCity-Launcher/1.0")
+                    client.CachePolicy = New System.Net.Cache.RequestCachePolicy(System.Net.Cache.RequestCacheLevel.NoCacheNoStore)
+                    Await client.DownloadFileTaskAsync(New Uri(repoBasepath & ruleFile), tmpPath)
+                End Using
+                System.IO.File.Copy(tmpPath, localPath, True)
+            Catch ex As Net.WebException
+                Dim resp = TryCast(ex.Response, Net.HttpWebResponse)
+                If resp IsNot Nothing AndAlso resp.StatusCode = Net.HttpStatusCode.NotFound Then
+                    Try
+                        System.IO.File.Delete(localPath)
+                    Catch
+                    End Try
+                End If
+            Catch
+                ' Rete assente o altro errore: usa la copia locale precedente se presente
+            End Try
+            Try
+                System.IO.File.Delete(tmpPath)
+            Catch
+            End Try
+        Next
+    End Function
+
+    ''' <summary>Cartelle dentro .gangdrogacity da non toccare durante il reset completo.</summary>
+    Private Function IsUserDataOrTrashFolder(folderPath As String) As Boolean
+        Dim name As String = Path.GetFileName(folderPath.TrimEnd("\"c, "/"c))
+        Return name.Equals("userdata", StringComparison.OrdinalIgnoreCase) OrElse
+               name.IndexOf(".trash-", StringComparison.OrdinalIgnoreCase) >= 0
+    End Function
+
     Private Function ShouldSkipManifestFile(filePath As String) As Boolean
         Return Not String.IsNullOrEmpty(filePath) AndAlso filePath.IndexOf("[server]", StringComparison.OrdinalIgnoreCase) >= 0
     End Function
@@ -294,6 +354,19 @@ Public Class Form1
         End Using
         Dim json As String = Await System.IO.File.ReadAllTextAsync(manifestPath)
         manifest = Newtonsoft.Json.Linq.JObject.Parse(json)
+
+        ' Regole user-data / file protetti del modpack (.userdata, .oncelist, .gitignore, .manifestignore)
+        Await DownloadUserDataRulesAsync()
+        udm.LoadRules(downloadDir)
+
+        ' Dopo un reset ripristina i dati utente dal mirror PRIMA di toccare i file del manifest,
+        ' cosi' la versione del giocatore ha la precedenza sui default del pack
+        If pendingUserDataRestore Then
+            pendingUserDataRestore = False
+            Dim restoredCount As Integer = Await Task.Run(Function() udm.Restore())
+            If restoredCount > 0 Then AddLog($"Dati utente ripristinati: {restoredCount} file")
+        End If
+
         Try
             Try
                 remoteCommitId = Await GetRemoteModpackCommitIdAsync()
@@ -351,27 +424,38 @@ Public Class Form1
                                                          Dim filePath As String = Path.Combine(gameDir, fileName)
                                                          Dim fileSize As Long = content("size").ToObject(Of Long)()
                                                          Dim fileHash As String = content("sha256").ToObject(Of String)()
-                                                         Dim isOnce As Boolean = If(content("once") IsNot Nothing, content("once").ToObject(Of Boolean)(), False)
+                                                         Dim manifestOnce As Boolean = If(content("once") IsNot Nothing, content("once").ToObject(Of Boolean)(), False)
+                                                         ' File utente: flag "once" del manifest oppure regole user-data
+                                                         Dim isUserFile As Boolean = manifestOnce OrElse udm.IsUserData(fileName)
+                                                         Dim downloadPath As String = filePath
+                                                         Dim prevDefaultHash As String = ""
                                                          Dim isValid As Boolean
-                                                         If isOnce Then
-                                                             If Not System.IO.File.Exists(filePath & ".once") Then
-                                                                 isValid = False
-                                                             ElseIf Not System.IO.File.Exists(filePath) And System.IO.File.Exists(filePath & ".once") Then
-                                                                 System.IO.File.Copy(filePath & ".once", filePath, True)
+
+                                                         If isUserFile Then
+                                                             ' La versione del pack va in userdata\defaults, mai sopra il file del giocatore
+                                                             downloadPath = udm.DefaultPath(fileName)
+                                                             isValid = Await VerifyFileWithCacheAsync(downloadPath, fileSize, fileHash)
+                                                             If isValid Then
+                                                                 ' Default gia' aggiornato: crea il file se manca (e migra l'eventuale .once)
+                                                                 Dim applied As String = udm.ApplyDefault(fileName, "")
+                                                                 If applied IsNot Nothing Then SafeInvoke(Sub() AddLog(applied))
+                                                             Else
+                                                                 prevDefaultHash = udm.PreviousDefaultHash(fileName)
                                                              End If
                                                          Else
                                                              isValid = Await VerifyFileWithCacheAsync(filePath, fileSize, fileHash)
-
                                                          End If
 
                                                          Return New With {
                                                              .Content = content,
                                                              .FilePath = filePath,
+                                                             .DownloadPath = downloadPath,
                                                              .FileSize = fileSize,
                                                              .FileHash = fileHash,
                                                              .FileName = fileName,
                                                              .IsValid = isValid,
-                                                             .IsOnce = isOnce
+                                                             .IsOnce = isUserFile,
+                                                             .PrevDefaultHash = prevDefaultHash
                                                          }
                                                      Finally
                                                          semaphore.Release()
@@ -407,21 +491,26 @@ Public Class Form1
             Dim downloadTasks = filesToDownload.Select(Async Function(fileInfo)
                                                            Await downloadSemaphore.WaitAsync()
                                                            Try
-                                                               Dim dir As String = Path.GetDirectoryName(fileInfo.FilePath)
-                                                               If Not Directory.Exists(dir) Then
-                                                                   Directory.CreateDirectory(dir)
+                                                               Dim targetPath As String = fileInfo.DownloadPath
+                                                               Dim targetDir As String = Path.GetDirectoryName(targetPath)
+                                                               If Not Directory.Exists(targetDir) Then
+                                                                   Directory.CreateDirectory(targetDir)
                                                                End If
 
                                                                Dim fileUrl As String = repoBasepath & fileInfo.FileName
-                                                               If fileInfo.IsOnce Then
-                                                                   fileInfo.FilePath = fileInfo.FilePath & ".once"
-                                                               End If
                                                                Using downloadClient As New Net.WebClient()
-                                                                   Await DownloadFileTaskAsync(downloadClient, New Uri(fileUrl), fileInfo.FilePath, False)
+                                                                   Await DownloadFileTaskAsync(downloadClient, New Uri(fileUrl), targetPath, False)
                                                                End Using
 
-                                                               UpdateHashCacheEntry(fileInfo.FilePath, fileInfo.FileSize, fileInfo.FileHash)
+                                                               UpdateHashCacheEntry(targetPath, fileInfo.FileSize, fileInfo.FileHash)
                                                                Interlocked.Add(downloadedSize, fileInfo.FileSize)
+
+                                                               If fileInfo.IsOnce Then
+                                                                   ' Nuovo default scaricato: crea il file se manca, aggiornalo solo se il
+                                                                   ' giocatore non l'aveva mai personalizzato, altrimenti lascialo intatto
+                                                                   Dim applied As String = udm.ApplyDefault(fileInfo.FileName, fileInfo.PrevDefaultHash)
+                                                                   If applied IsNot Nothing Then SafeInvoke(Sub() AddLog(applied))
+                                                               End If
 
                                                                If DateTime.Now.Subtract(lastProgressUpdate).TotalMilliseconds > 2000 Then
                                                                    lastProgressUpdate = DateTime.Now
@@ -429,10 +518,6 @@ Public Class Form1
                                                                               Dim progressValue As Integer = 25 + CInt((downloadedSize / totalSize) * 20)
                                                                               ProgressBar1.Value = Math.Min(progressValue, 45)
                                                                               Dim percentage = Math.Round((downloadedSize / totalSize) * 100, 1)
-                                                                              'AddLog($" Download: {percentage}% completato")
-                                                                              ''' se volessi aggiungere il tempo rimanente
-                                                                              ''' 
-
                                                                               Dim elapsed As TimeSpan = DateTime.Now - startTime
                                                                               Dim estimatedTotalTime As TimeSpan = TimeSpan.FromTicks(elapsed.Ticks * totalSize / downloadedSize)
                                                                               Dim remainingTime As TimeSpan = estimatedTotalTime - elapsed
@@ -441,13 +526,6 @@ Public Class Form1
                                                                End If
 
                                                            Finally
-                                                               If fileInfo.IsOnce And Not System.IO.File.Exists(fileInfo.FilePath.ToString().Replace(".once", "")) Then
-                                                                   Try
-                                                                       System.IO.File.Copy(fileInfo.FilePath, fileInfo.FilePath.ToString().Replace(".once", ""), True)
-                                                                   Catch
-                                                                       ' Ignora errori di copia
-                                                                   End Try
-                                                               End If
                                                                downloadSemaphore.Release()
                                                            End Try
                                                        End Function).ToArray()
@@ -536,28 +614,9 @@ Public Class Form1
                 Next
             End If
 
-            '''escludi tutti i file nel .gitignore
-            '''
-
-            Dim gitignorePath As String = Path.Combine(downloadDir, ".gitignore")
-            If System.IO.File.Exists(gitignorePath) Then
-                Dim gitignoreLines = System.IO.File.ReadAllLines(gitignorePath)
-                For Each line In gitignoreLines
-                    Dim trimmedLine = line.Trim()
-                    If Not String.IsNullOrEmpty(trimmedLine) AndAlso Not trimmedLine.StartsWith("#") Then
-                        Dim ignorePath = Path.GetFullPath(Path.Combine(target, trimmedLine))
-                        If Directory.Exists(ignorePath) Then
-                            Dim allIgnoreFiles = Directory.GetFiles(ignorePath, "*", SearchOption.AllDirectories)
-                            For Each file In allIgnoreFiles
-                                Dim fullPath = Path.GetFullPath(file)
-                                validFiles.Add(fullPath)
-                            Next
-                        ElseIf File.Exists(ignorePath) Then
-                            validFiles.Add(ignorePath)
-                        End If
-                    End If
-                Next
-            End If
+            ' File protetti: dati utente (impostazioni, keybind, waypoint...) e pattern di
+            ' .gitignore / .manifestignore del modpack. Vengono valutati nel filtro di cancellazione.
+            udm.LoadRules(downloadDir)
 
             If excludeMinecraft Then
 
@@ -602,7 +661,8 @@ Public Class Form1
 
             Await Task.Run(Sub()
                                Dim allFiles = Directory.GetFiles(target, "*", SearchOption.AllDirectories)
-                               Dim toDelete = allFiles.Where(Function(f) Not validFiles.Contains(Path.GetFullPath(f))).ToList()
+                               Dim toDelete = allFiles.Where(Function(f) Not validFiles.Contains(Path.GetFullPath(f)) AndAlso
+                                                                 Not udm.IsProtected(udm.RelativePath(f))).ToList()
                                toDeleteCount = toDelete.Count
                                If toDeleteCount = 0 Then Return
 
@@ -2311,6 +2371,14 @@ Public Class Form1
                 If mcTask.HasExited Then
                     AddLog($"🎮 Minecraft chiuso (Exit Code: {mcTask.ExitCode})")
 
+                    ' Salva subito le impostazioni/keybind/waypoint modificati in partita
+                    Task.Run(Sub()
+                                 Try
+                                     udm.Backup()
+                                 Catch
+                                 End Try
+                             End Sub)
+
                     ' Ferma monitoraggio
                     StopProcessMonitoring()
 
@@ -2378,6 +2446,12 @@ Public Class Form1
         Await Task.Delay(1000)
         If Directory.Exists(gameDir) Then
             Try
+                ' Salva i dati utente nel mirror e preparane il ripristino dopo il reset
+                udm.LoadRules(downloadDir)
+                Await Task.Run(Function() udm.Backup())
+                skipUserDataBackup = True
+                pendingUserDataRestore = True
+
                 Await RemoveAllNonManifestFiles()
                 ' Rimuovi tutti i marker di stato
                 File.Delete(Path.Combine(gameDir, "version.txt"))
@@ -2518,15 +2592,33 @@ Public Class Form1
                      Try
                          Await Task.Delay(300)
 
-                         ' Pulisce ogni dato gestito dal launcher per forzare una reinstallazione completa.
-                         ' La cartella viene rinominata all'istante e cancellata in background:
-                         ' il percorso originale e' subito libero e il launcher puo' ripartire.
+                         ' Salva i dati utente (impostazioni, keybind, waypoint) nel mirror userdata
+                         Try
+                             udm.LoadRules(downloadDir)
+                             udm.Backup()
+                         Catch
+                         End Try
+                         skipUserDataBackup = True
+                         pendingUserDataRestore = True
+
+                         ' Elimina game data, download e cache preservando la cartella userdata.
+                         ' Le cartelle vengono rinominate all'istante e cancellate in background.
                          If Directory.Exists(minecraftDir) Then
-                             SafeInvoke(Sub() AddLog("Rimozione dati precedenti..."))
-                             Dim trashTask As Task = DirectoryCleaner.FastDeleteDirectory(minecraftDir)
-                             If Directory.Exists(minecraftDir) Then
-                                 ' Rinomina non riuscita: attendi l'eliminazione diretta
-                                 Await trashTask
+                             SafeInvoke(Sub() AddLog("Rimozione dati di gioco precedenti..."))
+                             Dim trashTasks As New List(Of Task)
+                             For Each entry As String In Directory.GetDirectories(minecraftDir)
+                                 If IsUserDataOrTrashFolder(entry) Then Continue For
+                                 trashTasks.Add(DirectoryCleaner.FastDeleteDirectory(entry))
+                             Next
+                             For Each leftoverFile As String In Directory.GetFiles(minecraftDir)
+                                 Try
+                                     System.IO.File.Delete(leftoverFile)
+                                 Catch
+                                 End Try
+                             Next
+                             ' Attendi solo se qualche cartella non e' stata rinominata (file bloccati)
+                             If Directory.GetDirectories(minecraftDir).Any(Function(d) Not IsUserDataOrTrashFolder(d)) Then
+                                 Await Task.WhenAll(trashTasks)
                              End If
                          End If
 
