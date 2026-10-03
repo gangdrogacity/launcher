@@ -1,0 +1,34 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="GangDrogaCity.App.SettingsWindow"
+        Title="Impostazioni"
+        Width="318" Height="375"
+        CanResize="False"
+        SystemDecorations="None"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="#404040">
+
+  <Canvas x:Name="RootCanvas" Background="#404040">
+    <TextBlock Canvas.Left="17" Canvas.Top="13" Foreground="White" FontSize="20" FontWeight="Bold" Text="Impostazioni" />
+    <Button x:Name="closeBtn" Classes="flat" Canvas.Left="271" Canvas.Top="6" Width="39" Height="23"
+            Background="Firebrick" FontSize="12" Content="X" Padding="0" />
+
+    <TextBlock Canvas.Left="116" Canvas.Top="59" Foreground="White" FontSize="15" Text="Username" />
+    <TextBox x:Name="usernameTxt" Canvas.Left="73" Canvas.Top="89" Width="171" Height="28"
+             Background="DimGray" Foreground="White" CornerRadius="0" FontSize="13" MaxLength="16" />
+
+    <Button x:Name="saveBtn" Classes="flat" Canvas.Left="107" Canvas.Top="137" Width="104" Height="34"
+            Background="Black" FontSize="13" Content="Salva" />
+
+    <Button x:Name="verifyBtn" Classes="flat" Canvas.Left="73" Canvas.Top="224" Width="172" Height="28"
+            Background="#00C000" FontSize="12" Content="Verifica installazione" />
+    <Button x:Name="reinstallMcBtn" Classes="flat" Canvas.Left="81" Canvas.Top="258" Width="154" Height="28"
+            Background="#C0C000" Foreground="Black" FontSize="12" Content="Reinstalla Minecraft" />
+    <Button x:Name="reinstallAllBtn" Classes="flat" Canvas.Left="95" Canvas.Top="292" Width="124" Height="28"
+            Background="Red" FontSize="12" Content="Reinstalla tutto" />
+
+    <Button x:Name="branchBtn" Classes="flat" Canvas.Left="222" Canvas.Top="348" Width="88" Height="24"
+            Background="Black" FontSize="10" Content="Cambia branch" Padding="0" />
+  </Canvas>
+</Window>

@@ -1,202 +1,128 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Build script per creare gli artefatti di release di GangDrogaCity Launcher.
+    Build locale degli artefatti di release di GangDrogaCity Launcher (tutte le piattaforme).
 .DESCRIPTION
-    Produce 3 artefatti identici alla release GitHub:
-      1. GangDrogaCity.exe         - EXE self-contained single-file (win-x86)
-      2. GangDrogaCity.7z          - L'EXE compresso in 7z
-      3. GangDrogaCity-full_{ver}-Windows_x64.7z - Pacchetto completo (debug + publish + runtime)
+    Richiede solo il .NET 8 SDK (niente Visual Studio). Produce nella cartella release\:
+      GangDrogaCity.exe                  Windows x64
+      GangDrogaCity.7z                   exe compresso (aggiornamento launcher <= 2.2.5), se 7z e' disponibile
+      GangDrogaCity-windows-x64.zip      exe in zip (aggiornamento launcher >= 2.2.6)
+      GangDrogaCity-linux-x64.tar.gz     Linux x64
+      GangDrogaCity-linux-arm64.tar.gz   Linux arm64
+      GangDrogaCity-macos-x64.zip        macOS Intel (bundle .app)
+      GangDrogaCity-macos-arm64.zip      macOS Apple Silicon (bundle .app)
+    La release ufficiale viene prodotta dal workflow GitHub Actions (.github/workflows/release.yml)
+    al push di un tag: questo script serve per build e test locali.
 .PARAMETER Version
-    Versione della release (es. "2.2.0"). Se omesso, viene letto da Settings.settings.
+    Versione (es. "2.2.6.0"). Se omessa viene letta dal csproj.
+.PARAMETER Rids
+    Runtime identifier da pubblicare. Default: tutti.
 .EXAMPLE
     .\build-release.ps1
-    .\build-release.ps1 -Version "2.3.0"
+    .\build-release.ps1 -Rids win-x64
 #>
 param(
-    [string]$Version
+    [string]$Version,
+    [string[]]$Rids = @("win-x64", "linux-x64", "linux-arm64", "osx-x64", "osx-arm64")
 )
 
 $ErrorActionPreference = "Stop"
-$projectDir = $PSScriptRoot
-$projectFile = Join-Path $projectDir "GangDrogaCity.vbproj"
-$releaseDir = Join-Path $projectDir "release"
+$root = $PSScriptRoot
+$appProject = Join-Path $root "src\GangDrogaCity.App\GangDrogaCity.App.csproj"
+$appDir = Join-Path $root "src\GangDrogaCity.App"
+$outRoot = Join-Path $root "out"
+$releaseDir = Join-Path $root "release"
 
-# --- Individua MSBuild (qualsiasi versione/edizione di Visual Studio) ---
-function Find-MSBuild {
-    # 1. vswhere: strumento ufficiale, presente con qualsiasi installazione di VS 2017+
-    $pf86 = ${env:ProgramFiles(x86)}
-    if (-not $pf86) { $pf86 = $env:ProgramFiles }
-    $vswhere = Join-Path $pf86 "Microsoft Visual Studio\Installer\vswhere.exe"
-    if (Test-Path $vswhere) {
-        $found = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -find "MSBuild\**\Bin\MSBuild.exe" 2>$null |
-            Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
-        if ($found) { return $found }
+if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
+    Write-Error ".NET SDK non trovato. Installa il .NET 8 SDK: https://dotnet.microsoft.com/download"
+    exit 1
+}
+
+if (-not $Version) {
+    $csproj = Get-Content $appProject -Raw
+    if ($csproj -match "<Version>([^<]+)</Version>") { $Version = $Matches[1] }
+}
+if (-not $Version) { Write-Error "Impossibile determinare la versione. Specifica -Version."; exit 1 }
+Write-Host "[OK] Versione: $Version" -ForegroundColor Green
+
+if (Test-Path $releaseDir) { Remove-Item $releaseDir -Recurse -Force }
+if (Test-Path $outRoot) { Remove-Item $outRoot -Recurse -Force }
+New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
+
+foreach ($rid in $Rids) {
+    Write-Host "`n=== Publish $rid ===" -ForegroundColor Cyan
+    $outDir = Join-Path $outRoot $rid
+    & dotnet publish $appProject -c Release -r $rid --self-contained true `
+        -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
+        -p:DebugType=none -p:DebugSymbols=false -o $outDir -v minimal
+    if ($LASTEXITCODE -ne 0) { Write-Error "Publish $rid fallita."; exit 1 }
+}
+
+function Find-SevenZip {
+    foreach ($c in @("7z", "7za", "7zz", "7zr")) {
+        $cmd = Get-Command $c -ErrorAction SilentlyContinue
+        if ($cmd) { return $cmd.Source }
     }
-    # 2. Percorsi noti (VS 2022 e successivi, tutte le edizioni)
-    $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}) | Where-Object { $_ }
-    foreach ($root in $roots) {
-        $candidates = Get-ChildItem -Path (Join-Path $root "Microsoft Visual Studio") -Directory -ErrorAction SilentlyContinue |
-            ForEach-Object { Get-ChildItem -Path $_.FullName -Directory -ErrorAction SilentlyContinue } |
-            ForEach-Object { Join-Path $_.FullName "MSBuild\Current\Bin\MSBuild.exe" } |
-            Where-Object { Test-Path $_ } | Sort-Object -Descending
-        if ($candidates) { return ($candidates | Select-Object -First 1) }
+    foreach ($p in @("$env:ProgramFiles\7-Zip\7z.exe", "${env:ProgramFiles(x86)}\7-Zip\7z.exe")) {
+        if ($p -and (Test-Path $p)) { return $p }
     }
-    # 3. MSBuild nel PATH
-    $cmd = Get-Command msbuild.exe -ErrorAction SilentlyContinue
-    if ($cmd) { return $cmd.Source }
     return $null
 }
 
-# --- Verifica prerequisiti ---
-$msbuild = Find-MSBuild
-if (-not $msbuild) {
-    Write-Error "MSBuild non trovato. Installa Visual Studio (2022 o successivo) o Build Tools."
-    exit 1
+# --- Windows ---
+if ($Rids -contains "win-x64") {
+    Copy-Item (Join-Path $outRoot "win-x64\GangDrogaCity.exe") (Join-Path $releaseDir "GangDrogaCity.exe") -Force
+    Compress-Archive -Path (Join-Path $releaseDir "GangDrogaCity.exe") -DestinationPath (Join-Path $releaseDir "GangDrogaCity-windows-x64.zip") -CompressionLevel Optimal -Force
+    $sevenZip = Find-SevenZip
+    if ($sevenZip) {
+        Push-Location $releaseDir
+        & $sevenZip a -mx=9 "GangDrogaCity.7z" "GangDrogaCity.exe" | Out-Null
+        Pop-Location
+    } else {
+        Write-Warning "7-Zip non trovato: GangDrogaCity.7z non creato (serve solo ai launcher <= 2.2.5 per aggiornarsi)."
+    }
 }
-Write-Host "[OK] MSBuild: $msbuild" -ForegroundColor Green
 
-# --- Leggi versione da Settings.settings se non specificata ---
-if (-not $Version) {
-    $settingsPath = Join-Path $projectDir "My Project\Settings.settings"
-    if (Test-Path $settingsPath) {
-        [xml]$settings = Get-Content $settingsPath
-        $versionNode = $settings.SettingsFile.Settings.Setting | Where-Object { $_.Name -eq "version" }
-        if ($versionNode) {
-            $Version = $versionNode.Value.'#text'
-            if (-not $Version) { $Version = $versionNode.Value }
+# --- Linux ---
+foreach ($arch in @("x64", "arm64")) {
+    $rid = "linux-$arch"
+    if ($Rids -contains $rid) {
+        $src = Join-Path $outRoot $rid
+        & tar -czf (Join-Path $releaseDir "GangDrogaCity-linux-$arch.tar.gz") -C $src GangDrogaCity
+        if ($LASTEXITCODE -ne 0) { Write-Error "tar $rid fallito."; exit 1 }
+    }
+}
+
+# --- macOS: bundle .app ---
+foreach ($arch in @("x64", "arm64")) {
+    $rid = "osx-$arch"
+    if ($Rids -contains $rid) {
+        $bundleRoot = Join-Path $outRoot "bundle-$arch"
+        $bundle = Join-Path $bundleRoot "GangDrogaCity.app"
+        New-Item -ItemType Directory -Force -Path (Join-Path $bundle "Contents\MacOS") | Out-Null
+        New-Item -ItemType Directory -Force -Path (Join-Path $bundle "Contents\Resources") | Out-Null
+        Copy-Item (Join-Path $outRoot "$rid\GangDrogaCity") (Join-Path $bundle "Contents\MacOS\GangDrogaCity") -Force
+        Copy-Item (Join-Path $appDir "macos\launcher.icns") (Join-Path $bundle "Contents\Resources\launcher.icns") -Force
+        (Get-Content (Join-Path $appDir "macos\Info.plist") -Raw).Replace("APP_VERSION", $Version) | Set-Content (Join-Path $bundle "Contents\Info.plist") -NoNewline
+        Set-Content (Join-Path $bundle "Contents\PkgInfo") "APPL????" -NoNewline
+        # Lo zip deve conservare i permessi di esecuzione: su Windows Compress-Archive non li conserva,
+        # quindi il bundle prodotto da Windows richiede "chmod +x" dopo l'estrazione. La release ufficiale
+        # viene creata su Linux dal workflow, dove "zip -y" conserva i permessi.
+        $zipCmd = Get-Command zip -ErrorAction SilentlyContinue
+        if ($zipCmd) {
+            Push-Location $bundleRoot
+            & zip -q -9 -r -y (Join-Path $releaseDir "GangDrogaCity-macos-$arch.zip") "GangDrogaCity.app"
+            Pop-Location
+        } else {
+            Compress-Archive -Path $bundle -DestinationPath (Join-Path $releaseDir "GangDrogaCity-macos-$arch.zip") -CompressionLevel Optimal -Force
+            Write-Warning "zip non trovato: usato Compress-Archive (il bundle macOS non conserva i permessi di esecuzione)."
         }
     }
-    if (-not $Version) {
-        Write-Error "Impossibile determinare la versione. Specifica -Version."
-        exit 1
-    }
-}
-Write-Host "[OK] Versione: $Version" -ForegroundColor Green
-
-# --- Pulizia ---
-Write-Host "`n=== Pulizia ===" -ForegroundColor Cyan
-if (Test-Path $releaseDir) { Remove-Item $releaseDir -Recurse -Force }
-New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
-
-$debugOut = Join-Path $projectDir "bin\Debug\net8.0-windows"
-$publishSingleFile = Join-Path $releaseDir "_publish-singlefile"
-$publishFull = Join-Path $releaseDir "_publish-full"
-$stagingDir = Join-Path $releaseDir "_staging-full"
-
-# --- Step 1: Build Debug (framework-dependent) ---
-Write-Host "`n=== Step 1: Build Debug ===" -ForegroundColor Cyan
-& $msbuild $projectFile /t:Rebuild /p:Configuration=Debug /v:minimal
-if ($LASTEXITCODE -ne 0) { Write-Error "Build Debug fallita."; exit 1 }
-Write-Host "[OK] Build Debug completata." -ForegroundColor Green
-
-# --- Step 2: Publish self-contained single-file (win-x86) ---
-Write-Host "`n=== Step 2: Publish SingleFile (win-x86) ===" -ForegroundColor Cyan
-& $msbuild $projectFile /restore /t:Publish /p:Configuration=Release /p:RuntimeIdentifier=win-x86 /p:SelfContained=true /p:PublishSingleFile=true /p:PublishDir="$publishSingleFile\" /v:minimal
-if ($LASTEXITCODE -ne 0) { Write-Error "Publish SingleFile fallita."; exit 1 }
-Write-Host "[OK] Publish SingleFile completata." -ForegroundColor Green
-
-# --- Step 3: Publish self-contained full (win-x86, no single file) ---
-Write-Host "`n=== Step 3: Publish Full (win-x86) ===" -ForegroundColor Cyan
-& $msbuild $projectFile /restore /t:Publish /p:Configuration=Release /p:RuntimeIdentifier=win-x86 /p:SelfContained=true /p:PublishSingleFile=false /p:PublishDir="$publishFull\" /v:minimal
-if ($LASTEXITCODE -ne 0) { Write-Error "Publish Full fallita."; exit 1 }
-Write-Host "[OK] Publish Full completata." -ForegroundColor Green
-
-# --- Step 4: Scarica 7zr.exe ---
-Write-Host "`n=== Step 4: Download 7zr.exe ===" -ForegroundColor Cyan
-$sevenZr = Join-Path $releaseDir "7zr.exe"
-if (-not (Test-Path $sevenZr)) {
-    $ProgressPreference = 'SilentlyContinue'
-    Invoke-WebRequest -Uri "https://www.7-zip.org/a/7zr.exe" -OutFile $sevenZr -UseBasicParsing
-    Write-Host "[OK] 7zr.exe scaricato." -ForegroundColor Green
-} else {
-    Write-Host "[OK] 7zr.exe gia presente." -ForegroundColor Green
 }
 
-# --- Step 5: Copia l'EXE standalone ---
-Write-Host "`n=== Step 5: Copia EXE standalone ===" -ForegroundColor Cyan
-$singleExe = Get-ChildItem -Path $publishSingleFile -Filter "GangDrogaCity.exe" -Recurse | Select-Object -First 1
-if (-not $singleExe) {
-    Write-Error "GangDrogaCity.exe non trovato nell'output SingleFile."
-    exit 1
-}
-$finalExe = Join-Path $releaseDir "GangDrogaCity.exe"
-Copy-Item $singleExe.FullName $finalExe -Force
-$exeSizeMB = [math]::Round((Get-Item $finalExe).Length / 1MB, 1)
-Write-Host "[OK] GangDrogaCity.exe ($exeSizeMB MB)" -ForegroundColor Green
-
-# --- Step 6: Crea GangDrogaCity.7z (solo l'EXE) ---
-Write-Host "`n=== Step 6: Crea GangDrogaCity.7z ===" -ForegroundColor Cyan
-$archive7z = Join-Path $releaseDir "GangDrogaCity.7z"
-& $sevenZr a -mx=9 -mmt=on $archive7z $finalExe
-if ($LASTEXITCODE -ne 0) { Write-Error "Creazione GangDrogaCity.7z fallita."; exit 1 }
-$archiveSizeMB = [math]::Round((Get-Item $archive7z).Length / 1MB, 1)
-Write-Host "[OK] GangDrogaCity.7z ($archiveSizeMB MB)" -ForegroundColor Green
-
-# --- Step 7: Assembla e crea il pacchetto full ---
-Write-Host "`n=== Step 7: Crea pacchetto full ===" -ForegroundColor Cyan
-
-# Crea struttura staging
-New-Item -ItemType Directory -Force -Path $stagingDir | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $stagingDir "publish\win-x86") | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $stagingDir "win-x86") | Out-Null
-
-# Root: build Debug output + 7zr.exe
-$debugFiles = @(
-    "GangDrogaCity.exe",
-    "GangDrogaCity.dll",
-    "GangDrogaCity.pdb",
-    "GangDrogaCity.deps.json",
-    "GangDrogaCity.dll.config",
-    "GangDrogaCity.runtimeconfig.json",
-    "AxInterop.SHDocVw.dll",
-    "AxInterop.WMPLib.dll",
-    "Interop.SHDocVw.dll",
-    "Interop.WMPLib.dll",
-    "Newtonsoft.Json.dll",
-    "Octokit.dll"
-)
-foreach ($f in $debugFiles) {
-    $src = Join-Path $debugOut $f
-    if (Test-Path $src) {
-        Copy-Item $src (Join-Path $stagingDir $f) -Force
-    } else {
-        Write-Warning "File Debug mancante: $f"
-    }
-}
-# 7zr.exe nella root
-Copy-Item $sevenZr (Join-Path $stagingDir "7zr.exe") -Force
-
-# publish\win-x86\: single-file publish output
-Copy-Item "$publishSingleFile\*" (Join-Path $stagingDir "publish\win-x86") -Recurse -Force
-
-# win-x86\: full self-contained publish
-Copy-Item "$publishFull\*" (Join-Path $stagingDir "win-x86") -Recurse -Force
-
-# Crea l'archivio full
-$fullArchiveName = "GangDrogaCity-full_$Version-Windows_x64.7z"
-$fullArchive = Join-Path $releaseDir $fullArchiveName
-Push-Location $stagingDir
-& $sevenZr a -mx=5 -ms=on -mmt=on $fullArchive *
-Pop-Location
-if ($LASTEXITCODE -ne 0) { Write-Error "Creazione pacchetto full fallita."; exit 1 }
-$fullSizeMB = [math]::Round((Get-Item $fullArchive).Length / 1MB, 1)
-Write-Host "[OK] $fullArchiveName ($fullSizeMB MB)" -ForegroundColor Green
-
-# --- Pulizia cartelle temporanee ---
-Write-Host "`n=== Pulizia temporanei ===" -ForegroundColor Cyan
-Remove-Item $publishSingleFile -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item $publishFull -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item $stagingDir -Recurse -Force -ErrorAction SilentlyContinue
-
-# --- Riepilogo ---
 Write-Host "`n========================================" -ForegroundColor Yellow
 Write-Host " RELEASE $Version - Artefatti pronti" -ForegroundColor Yellow
 Write-Host "========================================" -ForegroundColor Yellow
-Write-Host ""
-Get-ChildItem $releaseDir -File | Where-Object { $_.Name -ne "7zr.exe" } | ForEach-Object {
-    $sizeMB = [math]::Round($_.Length / 1MB, 1)
-    Write-Host "  $($_.Name)  ($sizeMB MB)" -ForegroundColor White
+Get-ChildItem $releaseDir -File | ForEach-Object {
+    Write-Host ("  {0,-40} {1,8:N1} MB" -f $_.Name, ($_.Length / 1MB))
 }
-Write-Host ""
-Write-Host "Cartella output: $releaseDir" -ForegroundColor Cyan

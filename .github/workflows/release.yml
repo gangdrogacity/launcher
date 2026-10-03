@@ -1,9 +1,17 @@
 name: Release
 
-# Compila il launcher su Windows con build-release.ps1 e pubblica la release
-# GitHub con i 3 artefatti (GangDrogaCity.exe, GangDrogaCity.7z, pacchetto full).
-# Si avvia pushando un tag con il numero di versione (es. 2.2.4.3)
-# oppure manualmente da Actions > Release > Run workflow.
+# Compila il launcher (Avalonia, .NET 8) per Windows, Linux e macOS e pubblica la release
+# GitHub con un artefatto per piattaforma. Si avvia pushando un tag con il numero di
+# versione (es. 2.2.6.0) oppure manualmente da Actions > Release > Run workflow.
+#
+# Asset prodotti:
+#   GangDrogaCity.exe                     Windows x64 (singolo eseguibile)
+#   GangDrogaCity.7z                      lo stesso exe compresso (usato dai launcher <= 2.2.5 per aggiornarsi)
+#   GangDrogaCity-windows-x64.zip         lo stesso exe in zip (usato dal self-update dei launcher >= 2.2.6)
+#   GangDrogaCity-linux-x64.tar.gz        Linux x64
+#   GangDrogaCity-linux-arm64.tar.gz      Linux arm64 (es. Raspberry Pi 5, server ARM)
+#   GangDrogaCity-macos-x64.zip           macOS Intel  (bundle .app, non firmato)
+#   GangDrogaCity-macos-arm64.zip         macOS Apple Silicon (bundle .app, non firmato)
 
 on:
   push:
@@ -12,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Versione (es. 2.2.4.3). Se vuota viene letta da Settings.settings"
+        description: "Versione (es. 2.2.6.0). Se vuota viene letta dal csproj"
         required: false
         type: string
 
@@ -23,9 +31,14 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  APP_PROJECT: src/GangDrogaCity.App/GangDrogaCity.App.csproj
+  DOTNET_NOLOGO: "1"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+
 jobs:
   build-release:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -37,44 +50,83 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      - name: Verifica Windows Media Player (riferimento COM WMPLib)
-        shell: pwsh
-        run: |
-          $wmp = Join-Path $env:windir "System32\wmp.dll"
-          if (-not (Test-Path $wmp)) {
-            Write-Host "wmp.dll assente: installo la capability Windows Media Player..."
-            Add-WindowsCapability -Online -Name "Media.WindowsMediaPlayer~~~~0.0.12.0" | Out-Null
-          }
-          if (-not (Test-Path $wmp)) { Write-Error "wmp.dll non disponibile sul runner"; exit 1 }
-          Write-Host "[OK] wmp.dll presente"
-
       - name: Determina versione
         id: ver
-        shell: pwsh
+        shell: bash
         run: |
-          $v = "${{ inputs.version }}".Trim()
-          if (-not $v -and "${{ github.ref_type }}" -eq "tag") { $v = "${{ github.ref_name }}" }
-          if (-not $v) {
-            [xml]$settings = Get-Content "My Project\Settings.settings"
-            $node = $settings.SettingsFile.Settings.Setting | Where-Object { $_.Name -eq "version" }
-            $v = $node.Value.'#text'
-            if (-not $v) { $v = $node.Value }
-          }
-          if (-not $v) { Write-Error "Versione non determinata"; exit 1 }
-          Write-Host "Versione: $v"
-          "version=$v" >> $env:GITHUB_OUTPUT
+          set -euo pipefail
+          v="${{ inputs.version }}"
+          if [ -z "$v" ] && [ "${{ github.ref_type }}" = "tag" ]; then v="${{ github.ref_name }}"; fi
+          if [ -z "$v" ]; then v=$(grep -oP '(?<=<Version>)[^<]+' "$APP_PROJECT"); fi
+          if [ -z "$v" ]; then echo "Versione non determinata" >&2; exit 1; fi
+          echo "Versione: $v"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
 
-      - name: Restore pacchetti NuGet
-        shell: pwsh
-        run: dotnet restore GangDrogaCity.vbproj
+      - name: Verifica versione nel csproj
+        shell: bash
+        run: |
+          set -euo pipefail
+          csprojVersion=$(grep -oP '(?<=<Version>)[^<]+' "$APP_PROJECT")
+          if [ "$csprojVersion" != "${{ steps.ver.outputs.version }}" ]; then
+            echo "::error::La versione nel csproj ($csprojVersion) non corrisponde al tag (${{ steps.ver.outputs.version }}). Aggiorna <Version> in $APP_PROJECT."
+            exit 1
+          fi
 
-      - name: Build artefatti di release
-        shell: pwsh
-        run: .\build-release.ps1 -Version "${{ steps.ver.outputs.version }}"
+      - name: Strumenti di compressione
+        shell: bash
+        run: sudo apt-get update -q && sudo apt-get install -y -q p7zip-full zip
 
-      - name: Elenco artefatti
-        shell: pwsh
-        run: Get-ChildItem release -File | Where-Object { $_.Name -ne "7zr.exe" } | Format-Table Name, @{n="MB";e={[math]::Round($_.Length/1MB,1)}}
+      - name: Restore
+        shell: bash
+        run: dotnet restore GangDrogaCity.sln
+
+      - name: Publish (tutte le piattaforme)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for rid in win-x64 linux-x64 linux-arm64 osx-x64 osx-arm64; do
+            echo "::group::publish $rid"
+            dotnet publish "$APP_PROJECT" -c Release -r "$rid" --self-contained true \
+              -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true \
+              -p:DebugType=none -p:DebugSymbols=false \
+              -o "out/$rid"
+            echo "::endgroup::"
+          done
+          find out -maxdepth 2 -type f | sort
+
+      - name: Crea artefatti
+        shell: bash
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          APP=src/GangDrogaCity.App
+
+          # --- Windows ---
+          cp out/win-x64/GangDrogaCity.exe release/GangDrogaCity.exe
+          (cd release && 7z a -mx=9 GangDrogaCity.7z GangDrogaCity.exe >/dev/null)
+          (cd release && zip -q -9 GangDrogaCity-windows-x64.zip GangDrogaCity.exe)
+
+          # --- Linux ---
+          for arch in x64 arm64; do
+            chmod +x "out/linux-$arch/GangDrogaCity"
+            tar -czf "release/GangDrogaCity-linux-$arch.tar.gz" -C "out/linux-$arch" GangDrogaCity
+          done
+
+          # --- macOS: bundle .app (non firmato) ---
+          for arch in x64 arm64; do
+            bundle="out/bundle-$arch/GangDrogaCity.app"
+            mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
+            cp "out/osx-$arch/GangDrogaCity" "$bundle/Contents/MacOS/GangDrogaCity"
+            chmod +x "$bundle/Contents/MacOS/GangDrogaCity"
+            cp "$APP/macos/launcher.icns" "$bundle/Contents/Resources/launcher.icns"
+            sed "s/APP_VERSION/$VERSION/g" "$APP/macos/Info.plist" > "$bundle/Contents/Info.plist"
+            echo -n "APPL????" > "$bundle/Contents/PkgInfo"
+            (cd "out/bundle-$arch" && zip -q -9 -r -y "../../release/GangDrogaCity-macos-$arch.zip" GangDrogaCity.app)
+          done
+
+          ls -la release
 
       - name: Crea release GitHub
         shell: bash
@@ -85,17 +137,35 @@ jobs:
           set -euo pipefail
           prev=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --limit 20 --json tagName -q '[.[] | select(.tagName != env.VERSION)][0].tagName')
           if [ -n "$prev" ]; then
-            notes="**Full Changelog**: https://github.com/$GITHUB_REPOSITORY/compare/${prev}...${VERSION}"
+            changelog="**Full Changelog**: https://github.com/$GITHUB_REPOSITORY/compare/${prev}...${VERSION}"
           else
-            notes="**Full Changelog**: https://github.com/$GITHUB_REPOSITORY/commits/${VERSION}"
+            changelog="**Full Changelog**: https://github.com/$GITHUB_REPOSITORY/commits/${VERSION}"
           fi
-          echo "Note: $notes"
+          notes=$(cat <<EOF
+## Download
+
+| Piattaforma | File |
+|---|---|
+| Windows x64 | \`GangDrogaCity.exe\` |
+| Linux x64 | \`GangDrogaCity-linux-x64.tar.gz\` |
+| Linux arm64 | \`GangDrogaCity-linux-arm64.tar.gz\` |
+| macOS Apple Silicon | \`GangDrogaCity-macos-arm64.zip\` |
+| macOS Intel | \`GangDrogaCity-macos-x64.zip\` |
+
+**Linux**: estrai l'archivio e avvia \`./GangDrogaCity\` (se serve: \`chmod +x GangDrogaCity\`).
+
+**macOS**: estrai lo zip e trascina \`GangDrogaCity.app\` in Applicazioni. L'app non e' firmata: al primo avvio fai **tasto destro → Apri** (oppure \`xattr -dr com.apple.quarantine GangDrogaCity.app\`). Gli aggiornamenti successivi avvengono da soli.
+
+$changelog
+EOF
+          )
+          assets=(release/GangDrogaCity.exe release/GangDrogaCity.7z release/GangDrogaCity-windows-x64.zip
+                  release/GangDrogaCity-linux-x64.tar.gz release/GangDrogaCity-linux-arm64.tar.gz
+                  release/GangDrogaCity-macos-x64.zip release/GangDrogaCity-macos-arm64.zip)
           if gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $VERSION già esistente: aggiorno gli asset"
-            gh release upload "$VERSION" --repo "$GITHUB_REPOSITORY" --clobber \
-              release/GangDrogaCity.exe release/GangDrogaCity.7z "release/GangDrogaCity-full_${VERSION}-Windows_x64.7z"
+            echo "Release $VERSION gia' esistente: aggiorno gli asset"
+            gh release upload "$VERSION" --repo "$GITHUB_REPOSITORY" --clobber "${assets[@]}"
           else
             gh release create "$VERSION" --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" --title "$VERSION" --notes "$notes" --latest \
-              release/GangDrogaCity.exe release/GangDrogaCity.7z "release/GangDrogaCity-full_${VERSION}-Windows_x64.7z"
+              --target "$GITHUB_SHA" --title "$VERSION" --notes "$notes" --latest "${assets[@]}"
           fi

@@ -1,0 +1,81 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="GangDrogaCity.App.MainWindow"
+        Title="GangDrogaCity"
+        Width="1345" Height="652"
+        MinWidth="1345" MinHeight="652"
+        CanResize="False"
+        SystemDecorations="None"
+        WindowStartupLocation="CenterScreen"
+        Background="Black"
+        Icon="avares://GangDrogaCity/Assets/launcher.ico">
+
+  <Grid>
+    <!-- Sfondo -->
+    <Image Source="avares://GangDrogaCity/Assets/background.png" Stretch="Fill" />
+
+    <Canvas x:Name="RootCanvas" Background="Transparent">
+
+      <!-- Barra superiore -->
+      <TextBlock x:Name="versionLabel" Canvas.Left="6" Canvas.Top="6" Foreground="White" FontSize="12" Text="v0.0.0" />
+      <Button x:Name="minimizeBtn" Classes="flat" Canvas.Left="1246" Canvas.Top="9" Width="39" Height="23"
+              Background="Teal" FontSize="11" Content="__" Padding="0" />
+      <Button x:Name="closeBtn" Classes="flat" Canvas.Left="1294" Canvas.Top="9" Width="39" Height="23"
+              Background="Firebrick" FontSize="12" Content="X" Padding="0" />
+
+      <!-- Pannello installazione (ex Panel1) -->
+      <Canvas x:Name="installPanel" Canvas.Left="-7" Canvas.Top="45" Width="1357" Height="625" IsVisible="True">
+        <Image Source="avares://GangDrogaCity/Assets/logo.png" Canvas.Left="368" Canvas.Top="-5" Width="578" Height="587" Stretch="Fill" />
+        <Image Source="avares://GangDrogaCity/Assets/mascot.gif" Canvas.Left="9" Canvas.Top="503" Width="88" Height="81" Stretch="Uniform" />
+        <Border x:Name="statusBorder" Canvas.Left="99" Canvas.Top="549" Background="Transparent" Padding="6,2">
+          <TextBlock x:Name="statusText" Foreground="White" FontSize="20" Text="Avvio..." MaxWidth="1200" TextTrimming="CharacterEllipsis" />
+        </Border>
+        <ProgressBar x:Name="progressBar" Canvas.Left="7" Canvas.Top="588" Width="1347" Height="21"
+                     Minimum="0" Maximum="100" Value="0" Foreground="Green" Background="#30000000" CornerRadius="0" />
+      </Canvas>
+
+      <!-- Menu principale (ex menuPanel) -->
+      <Canvas x:Name="menuPanel" Canvas.Left="4" Canvas.Top="35" Width="1346" Height="498" IsVisible="False">
+        <Button x:Name="userLabel" Canvas.Left="2" Canvas.Top="0" Background="Transparent" BorderThickness="0"
+                Foreground="White" FontSize="20" Padding="8,4" Cursor="Hand"
+                Content=" Username non impostato.&#x0a;Clicca qui per impostarlo" />
+        <Button x:Name="settingsBtn" Classes="flat" Canvas.Left="1219" Canvas.Top="9" Width="110" Height="30"
+                Background="#404040" FontSize="13" Content="Impostazioni" />
+        <Button x:Name="playBtn" Classes="flat" Canvas.Left="440" Canvas.Top="223" Width="420" Height="100"
+                Background="Green" FontSize="24" Content="PLAY" />
+        <Button x:Name="reducedGraphicsBtn" Classes="flat" Canvas.Left="440" Canvas.Top="326" Width="420" Height="30"
+                Background="#804000" FontSize="13" Content="Gioca con la grafica di merda" />
+      </Canvas>
+
+      <!-- Pannello operazione in corso (ex operationPanel) -->
+      <Border x:Name="operationPanel" Canvas.Left="368" Canvas.Top="35" Width="585" Height="68" Background="Olive" IsVisible="False">
+        <TextBlock x:Name="operationText" Foreground="White" FontSize="18" FontWeight="Bold"
+                   FontFamily="Consolas, Menlo, DejaVu Sans Mono, monospace"
+                   VerticalAlignment="Center" HorizontalAlignment="Center" TextAlignment="Center"
+                   TextWrapping="Wrap" Margin="12,0" Text="..." />
+      </Border>
+
+      <!-- Pannello crash (ex crashPanel) -->
+      <Border x:Name="crashPanel" Canvas.Left="368" Canvas.Top="397" Width="585" Height="123" Background="#C00000" IsVisible="False">
+        <Canvas>
+          <TextBlock Canvas.Left="6" Canvas.Top="6" Foreground="White" FontSize="18" FontWeight="Bold"
+                     FontFamily="Consolas, Menlo, DejaVu Sans Mono, monospace" Text="Uh Oh :/" />
+          <TextBlock Canvas.Left="28" Canvas.Top="37" Foreground="White" FontSize="12" FontWeight="Bold"
+                     FontFamily="Consolas, Menlo, DejaVu Sans Mono, monospace"
+                     Text="Sembra che il gioco abbia avuto un problema,&#x0a;invia il crash report per farlo esaminare e risolvere il problema" />
+          <Button x:Name="sendCrashBtn" Classes="flat" Canvas.Left="243" Canvas.Top="83" Width="82" Height="30"
+                  Background="Navy" FontSize="13" Content="Invia" />
+        </Canvas>
+      </Border>
+
+      <!-- Pannello "non spegnere" (ex doNotPowerOffPanel) -->
+      <Border x:Name="doNotPowerOffPanel" Canvas.Left="368" Canvas.Top="531" Width="585" Height="38" Background="Teal" IsVisible="False">
+        <TextBlock Foreground="White" FontSize="14" FontWeight="Bold"
+                   FontFamily="Consolas, Menlo, DejaVu Sans Mono, monospace"
+                   VerticalAlignment="Center" HorizontalAlignment="Center"
+                   Text="NON PREMERE IL TASTO POWER O RESET DURANTE LE OPERAZIONI" />
+      </Border>
+
+    </Canvas>
+  </Grid>
+</Window>

@@ -400,3 +400,7 @@ FodyWeavers.xsd
 # JetBrains Rider
 *.sln.iml
 /_release_inspect
+
+# Output di build-release.ps1 e del workflow
+out/
+release/
