@@ -141,24 +141,8 @@ jobs:
           else
             changelog="**Full Changelog**: https://github.com/$GITHUB_REPOSITORY/commits/${VERSION}"
           fi
-          notes=$(cat <<EOF
-## Download
-
-| Piattaforma | File |
-|---|---|
-| Windows x64 | \`GangDrogaCity.exe\` |
-| Linux x64 | \`GangDrogaCity-linux-x64.tar.gz\` |
-| Linux arm64 | \`GangDrogaCity-linux-arm64.tar.gz\` |
-| macOS Apple Silicon | \`GangDrogaCity-macos-arm64.zip\` |
-| macOS Intel | \`GangDrogaCity-macos-x64.zip\` |
-
-**Linux**: estrai l'archivio e avvia \`./GangDrogaCity\` (se serve: \`chmod +x GangDrogaCity\`).
-
-**macOS**: estrai lo zip e trascina \`GangDrogaCity.app\` in Applicazioni. L'app non e' firmata: al primo avvio fai **tasto destro → Apri** (oppure \`xattr -dr com.apple.quarantine GangDrogaCity.app\`). Gli aggiornamenti successivi avvengono da soli.
-
-$changelog
-EOF
-          )
+          # Note di release: template in .github/release-notes.md (evita heredoc dentro lo YAML)
+          sed "s|CHANGELOG_LINE|$changelog|" .github/release-notes.md > release-notes.md
           assets=(release/GangDrogaCity.exe release/GangDrogaCity.7z release/GangDrogaCity-windows-x64.zip
                   release/GangDrogaCity-linux-x64.tar.gz release/GangDrogaCity-linux-arm64.tar.gz
                   release/GangDrogaCity-macos-x64.zip release/GangDrogaCity-macos-arm64.zip)
@@ -167,5 +151,5 @@ EOF
             gh release upload "$VERSION" --repo "$GITHUB_REPOSITORY" --clobber "${assets[@]}"
           else
             gh release create "$VERSION" --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" --title "$VERSION" --notes "$notes" --latest "${assets[@]}"
+              --target "$GITHUB_SHA" --title "$VERSION" --notes-file release-notes.md --latest "${assets[@]}"
           fi
