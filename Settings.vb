@@ -34,7 +34,7 @@ Public Class Settings
 
     Private Sub Button2_Click(sender As Object, e As EventArgs) Handles Button2.Click
         Dim result = MessageBox.Show("Sei sicuro di voler reinstallare minecraft?", "Conferma", MessageBoxButtons.YesNo, MessageBoxIcon.Question)
-        If Not Form1.mcTask.HasExited Then
+        If Form1.mcTask IsNot Nothing AndAlso Not Form1.mcTask.HasExited Then
             MessageBox.Show("Chiudi prima Minecraft, poi riprova.", "Minecraft in esecuzione", MessageBoxButtons.OK, MessageBoxIcon.Information)
             Return
         End If
@@ -47,7 +47,7 @@ Public Class Settings
     Private Sub Button6_Click(sender As Object, e As EventArgs) Handles Button6.Click
         Dim result = MessageBox.Show("Sei sicuro di voler reinstallare tutto? Verranno rimossi Minecraft, cache, download e dati pacchetti.", "Conferma", MessageBoxButtons.YesNo, MessageBoxIcon.Warning)
 
-        If result <> DialogResult.Yes Then
+        If result = DialogResult.Yes Then
             If Form1.mcTask IsNot Nothing Then
                 Try
                     If Not Form1.mcTask.HasExited Then

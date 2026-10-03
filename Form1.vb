@@ -102,6 +102,8 @@ Public Class Form1
             Directory.CreateDirectory(downloadDir)
         End If
 
+        ' Elimina in background eventuali cartelle "cestino" rimaste da un reset precedente
+        DirectoryCleaner.CleanupLeftoverTrash(minecraftDir)
 
         AddLog("Avvio...")
         Await Task.Delay(1000)
@@ -592,35 +594,43 @@ Public Class Form1
 
             End If
 
-            ' Ottieni tutti i file nella gameDir
-            Dim allFiles = Directory.GetFiles(target, "*", SearchOption.AllDirectories)
+            ' Enumerazione e cancellazione su thread in background, in parallelo e senza
+            ' aggiornare la UI per ogni singolo file (era il motivo della lentezza).
+            Dim removedCount As Integer = 0
+            Dim errorCount As Integer = 0
+            Dim toDeleteCount As Integer = 0
 
-            ' Rimuovi file non mappati dal manifest
-            For Each file In allFiles
-                Dim fullPath = Path.GetFullPath(file)
-                If Not validFiles.Contains(fullPath) Then
-                    Try
-                        System.IO.File.Delete(file)
-                        SafeInvoke(Sub() AddLog($"Rimosso:{file.Replace(target & "\", "")}"))
-                        'Await Task.Delay(10)
-                    Catch ex As Exception
-                        SafeInvoke(Sub() AddLog($" Errore rimozione {Path.GetFileName(file)}: {ex.Message}"))
-                    End Try
+            Await Task.Run(Sub()
+                               Dim allFiles = Directory.GetFiles(target, "*", SearchOption.AllDirectories)
+                               Dim toDelete = allFiles.Where(Function(f) Not validFiles.Contains(Path.GetFullPath(f))).ToList()
+                               toDeleteCount = toDelete.Count
+                               If toDeleteCount = 0 Then Return
+
+                               SafeInvoke(Sub() AddLog($"Rimozione di {toDeleteCount} file obsoleti..."))
+
+                               removedCount = DirectoryCleaner.DeleteFilesParallel(toDelete,
+                                   Sub(f, ex) Threading.Interlocked.Increment(errorCount))
+
+                               ' Rimuovi directory vuote (dalla più profonda alla radice)
+                               Dim allDirs = Directory.GetDirectories(target, "*", SearchOption.AllDirectories).OrderByDescending(Function(d) d.Length)
+                               For Each dirPath In allDirs
+                                   Try
+                                       If Directory.Exists(dirPath) AndAlso Not Directory.EnumerateFileSystemEntries(dirPath).Any() Then
+                                           Directory.Delete(dirPath)
+                                       End If
+                                   Catch
+                                       ' Ignora errori di cancellazione directory
+                                   End Try
+                               Next
+                           End Sub)
+
+            If toDeleteCount > 0 Then
+                If errorCount > 0 Then
+                    AddLog($"Rimossi {removedCount} file obsoleti ({errorCount} non rimovibili)")
+                Else
+                    AddLog($"Rimossi {removedCount} file obsoleti")
                 End If
-            Next
-
-            ' Rimuovi directory vuote (dalla più profonda alla radice)
-            Dim allDirs = Directory.GetDirectories(target, "*", SearchOption.AllDirectories).OrderByDescending(Function(d) d.Length)
-            For Each dirPath In allDirs
-                Try
-                    If Directory.Exists(dirPath) AndAlso Not Directory.EnumerateFileSystemEntries(dirPath).Any() Then
-                        Directory.Delete(dirPath)
-                        SafeInvoke(Sub() AddLog($" Rimossa directory vuota: {dirPath.Replace(target & "\", "")}"))
-                    End If
-                Catch ex As Exception
-                    ' Ignora errori di cancellazione directory
-                End Try
-            Next
+            End If
 
         Catch ex As Exception
             SafeInvoke(Sub() AddLog($" Errore durante pulizia file: {ex.Message}"))
@@ -2508,9 +2518,16 @@ Public Class Form1
                      Try
                          Await Task.Delay(300)
 
-                         ' Pulisce ogni dato gestito dal launcher per forzare una reinstallazione completa
+                         ' Pulisce ogni dato gestito dal launcher per forzare una reinstallazione completa.
+                         ' La cartella viene rinominata all'istante e cancellata in background:
+                         ' il percorso originale e' subito libero e il launcher puo' ripartire.
                          If Directory.Exists(minecraftDir) Then
-                             Directory.Delete(minecraftDir, True)
+                             SafeInvoke(Sub() AddLog("Rimozione dati precedenti..."))
+                             Dim trashTask As Task = DirectoryCleaner.FastDeleteDirectory(minecraftDir)
+                             If Directory.Exists(minecraftDir) Then
+                                 ' Rinomina non riuscita: attendi l'eliminazione diretta
+                                 Await trashTask
+                             End If
                          End If
 
                          If Not Directory.Exists(minecraftDir) Then
