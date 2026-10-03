@@ -21,20 +21,38 @@ $ErrorActionPreference = "Stop"
 $projectDir = $PSScriptRoot
 $projectFile = Join-Path $projectDir "GangDrogaCity.vbproj"
 $releaseDir = Join-Path $projectDir "release"
-$msbuild = "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe"
+
+# --- Individua MSBuild (qualsiasi versione/edizione di Visual Studio) ---
+function Find-MSBuild {
+    # 1. vswhere: strumento ufficiale, presente con qualsiasi installazione di VS 2017+
+    $pf86 = ${env:ProgramFiles(x86)}
+    if (-not $pf86) { $pf86 = $env:ProgramFiles }
+    $vswhere = Join-Path $pf86 "Microsoft Visual Studio\Installer\vswhere.exe"
+    if (Test-Path $vswhere) {
+        $found = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -find "MSBuild\**\Bin\MSBuild.exe" 2>$null |
+            Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+        if ($found) { return $found }
+    }
+    # 2. Percorsi noti (VS 2022 e successivi, tutte le edizioni)
+    $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}) | Where-Object { $_ }
+    foreach ($root in $roots) {
+        $candidates = Get-ChildItem -Path (Join-Path $root "Microsoft Visual Studio") -Directory -ErrorAction SilentlyContinue |
+            ForEach-Object { Get-ChildItem -Path $_.FullName -Directory -ErrorAction SilentlyContinue } |
+            ForEach-Object { Join-Path $_.FullName "MSBuild\Current\Bin\MSBuild.exe" } |
+            Where-Object { Test-Path $_ } | Sort-Object -Descending
+        if ($candidates) { return ($candidates | Select-Object -First 1) }
+    }
+    # 3. MSBuild nel PATH
+    $cmd = Get-Command msbuild.exe -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    return $null
+}
 
 # --- Verifica prerequisiti ---
-if (-not (Test-Path $msbuild)) {
-    # Fallback: cerca MSBuild in altre edizioni
-    $editions = @("Enterprise", "Professional", "BuildTools")
-    foreach ($ed in $editions) {
-        $alt = "C:\Program Files\Microsoft Visual Studio\2022\$ed\MSBuild\Current\Bin\MSBuild.exe"
-        if (Test-Path $alt) { $msbuild = $alt; break }
-    }
-    if (-not (Test-Path $msbuild)) {
-        Write-Error "MSBuild non trovato. Installa Visual Studio 2022 o Build Tools."
-        exit 1
-    }
+$msbuild = Find-MSBuild
+if (-not $msbuild) {
+    Write-Error "MSBuild non trovato. Installa Visual Studio (2022 o successivo) o Build Tools."
+    exit 1
 }
 Write-Host "[OK] MSBuild: $msbuild" -ForegroundColor Green
 
