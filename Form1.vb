@@ -941,20 +941,26 @@ Public Class Form1
             AddLog("Migrazione completata. Installazione Fabric...")
         End If
 
-        ' Verifica se Fabric è già installato
+        ' Versioni richieste dal manifest
+        Dim manifestLoaderVersion As String = manifest("fabricLoaderVersion").ToObject(Of String)().Trim()
+        Dim manifestMcVersion As String = manifest("mcVersion").ToObject(Of String)().Trim()
+
+        ' Verifica se Fabric è già installato nella versione richiesta dal manifest.
+        ' Entrambe le versioni (loader E minecraft) devono coincidere: se il manifest
+        ' cambia anche solo una delle due, bisogna reinstallare.
         If File.Exists(fabricInstalledMarker) AndAlso fabricInst.IsFabricInstalled(My.Settings.fabricLoaderVersion, My.Settings.mcVersion, gameDir) Then
-            If My.Settings.fabricLoaderVersion = manifest("fabricLoaderVersion").ToObject(Of String)() Or My.Settings.mcVersion = manifest("mcVersion").ToObject(Of String)() Then
+            If My.Settings.fabricLoaderVersion = manifestLoaderVersion AndAlso My.Settings.mcVersion = manifestMcVersion Then
                 AddLog($"✓ Fabric Loader {My.Settings.fabricLoaderVersion} già installato")
                 ProgressBar1.Value = 65
                 Await step3()
                 Return
             End If
-
+            AddLog($"Manifest richiede Fabric Loader {manifestLoaderVersion} per Minecraft {manifestMcVersion} (installato: {My.Settings.fabricLoaderVersion} / {My.Settings.mcVersion}). Aggiornamento...")
         End If
 
         Try
-            My.Settings.fabricLoaderVersion = manifest("fabricLoaderVersion").ToObject(Of String)()
-            My.Settings.mcVersion = manifest("mcVersion").ToObject(Of String)()
+            My.Settings.fabricLoaderVersion = manifestLoaderVersion
+            My.Settings.mcVersion = manifestMcVersion
             My.Settings.fabricVersionId = "fabric-loader-" & My.Settings.fabricLoaderVersion & "-" & My.Settings.mcVersion
             My.Settings.Save()
             ''rimuovi marker
