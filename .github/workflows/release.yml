@@ -1,0 +1,101 @@
+name: Release
+
+# Compila il launcher su Windows con build-release.ps1 e pubblica la release
+# GitHub con i 3 artefatti (GangDrogaCity.exe, GangDrogaCity.7z, pacchetto full).
+# Si avvia pushando un tag con il numero di versione (es. 2.2.4.3)
+# oppure manualmente da Actions > Release > Run workflow.
+
+on:
+  push:
+    tags:
+      - "[0-9]*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versione (es. 2.2.4.3). Se vuota viene letta da Settings.settings"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Verifica Windows Media Player (riferimento COM WMPLib)
+        shell: pwsh
+        run: |
+          $wmp = Join-Path $env:windir "System32\wmp.dll"
+          if (-not (Test-Path $wmp)) {
+            Write-Host "wmp.dll assente: installo la capability Windows Media Player..."
+            Add-WindowsCapability -Online -Name "Media.WindowsMediaPlayer~~~~0.0.12.0" | Out-Null
+          }
+          if (-not (Test-Path $wmp)) { Write-Error "wmp.dll non disponibile sul runner"; exit 1 }
+          Write-Host "[OK] wmp.dll presente"
+
+      - name: Determina versione
+        id: ver
+        shell: pwsh
+        run: |
+          $v = "${{ inputs.version }}".Trim()
+          if (-not $v -and "${{ github.ref_type }}" -eq "tag") { $v = "${{ github.ref_name }}" }
+          if (-not $v) {
+            [xml]$settings = Get-Content "My Project\Settings.settings"
+            $node = $settings.SettingsFile.Settings.Setting | Where-Object { $_.Name -eq "version" }
+            $v = $node.Value.'#text'
+            if (-not $v) { $v = $node.Value }
+          }
+          if (-not $v) { Write-Error "Versione non determinata"; exit 1 }
+          Write-Host "Versione: $v"
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Restore pacchetti NuGet
+        shell: pwsh
+        run: dotnet restore GangDrogaCity.vbproj
+
+      - name: Build artefatti di release
+        shell: pwsh
+        run: .\build-release.ps1 -Version "${{ steps.ver.outputs.version }}"
+
+      - name: Elenco artefatti
+        shell: pwsh
+        run: Get-ChildItem release -File | Where-Object { $_.Name -ne "7zr.exe" } | Format-Table Name, @{n="MB";e={[math]::Round($_.Length/1MB,1)}}
+
+      - name: Crea release GitHub
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          prev=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --limit 20 --json tagName -q '[.[] | select(.tagName != env.VERSION)][0].tagName')
+          if [ -n "$prev" ]; then
+            notes="**Full Changelog**: https://github.com/$GITHUB_REPOSITORY/compare/${prev}...${VERSION}"
+          else
+            notes="**Full Changelog**: https://github.com/$GITHUB_REPOSITORY/commits/${VERSION}"
+          fi
+          echo "Note: $notes"
+          if gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $VERSION già esistente: aggiorno gli asset"
+            gh release upload "$VERSION" --repo "$GITHUB_REPOSITORY" --clobber \
+              release/GangDrogaCity.exe release/GangDrogaCity.7z "release/GangDrogaCity-full_${VERSION}-Windows_x64.7z"
+          else
+            gh release create "$VERSION" --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" --title "$VERSION" --notes "$notes" --latest \
+              release/GangDrogaCity.exe release/GangDrogaCity.7z "release/GangDrogaCity-full_${VERSION}-Windows_x64.7z"
+          fi
